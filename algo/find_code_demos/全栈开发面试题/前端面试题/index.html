@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>百度一下，你就知道</title>
+    <link rel="stylesheet" href="styles.css"> <!-- 引入CSS文件 -->
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <div class="navbar">
+        <div class="navbar-left">
+            <a href="#">新闻</a>
+            <a href="#">hao123</a>
+            <a href="#">地图</a>
+            <a href="#">贴吧</a>
+            <a href="#">视频</a>
+            <a href="#">图片</a>
+            <a href="#">网盘</a>
+            <a href="#">文库</a>
+            <a href="#">AI助手</a>
+            <a href="#">更多</a>
+        </div>
+        <div class="navbar-center">
+
+        </div>
+        <div class="navbar-right">
+        </div>
+        <a class="set_btn">设置</a>
+        <button class="login">登陆</span>
+    </div>
+
+    <!-- 百度Logo -->
+    <div class="logo" >
+        <img src="https://www.baidu.com/img/bd_logo1.png" href="https://www.baidu.com/s?wd=%E7%99%BE%E5%BA%A6%E7%83%AD%E6%90%9C&sa=ire_dl_gh_logo_texing&rsv_dl=igh_logo_pcs" alt="Baidu Logo">
+    </div>
+
+    <!-- 搜索框 -->
+    <div class="search-container">
+        <div class="search-box">
+            <input class="search-input" type="text" id="search" placeholder="请输入搜索内容">
+            <span class="soutu-btn"></span>
+            <span class="soutu-btn-camera"></span>
+        </div>
+        <button class="search-button" onclick="search()">百度一下</button>
+    </div>
+
+    <!-- 页脚 -->
+    <div class="footer">
+        <p>关于百度 | About Baidu | 使用百度前必读 | 帮助中心 | 广告服务 | 企业推广</p>
+        <p>京ICP证030173号 | 京公网安备11000002000001号 | 互联网违法和不良信息举报电话:12377</p>
+    </div>
+
+    <script>
+        function search() {
+            var query = document.getElementById("search").value;
+            if (query) {
+                window.location.href = "https://www.baidu.com/s?wd=" + encodeURIComponent(query);
+            }
+        }
+    </script>
+</body>
+</html>

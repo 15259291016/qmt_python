@@ -1,7 +1,7 @@
 import logging
 
-from algo.app.db import pgsql
-from algo.app.db.pgsql import WatchCode
+from app.db import pgsql
+from app.db.pgsql import WatchCode
 from datetime import datetime, timedelta, time
 import os
 import sys

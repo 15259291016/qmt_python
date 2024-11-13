@@ -31,7 +31,7 @@ from app.util.utils import gp_type_szsh
 import pywencai as wc
 from sqlalchemy.exc import IntegrityError
 
-from algo.app.db.pgsql import RecordOfTotalTurnover
+from app.db.pgsql import RecordOfTotalTurnover
 
 quotation = easyquotation.use('tencent')  # 新浪 ['sina'] 腾讯 ['tencent', 'qq']
 

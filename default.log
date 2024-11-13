@@ -254,3 +254,5 @@ INFO:root:['002084', '300471', '300972', '300986', '600028']
 DEBUG:matplotlib.pyplot:Loaded backend tkagg version 8.6.
 DEBUG:matplotlib.pyplot:Loaded backend tkagg version 8.6.
 DEBUG:matplotlib.pyplot:Loaded backend tkagg version 8.6.
+DEBUG:asyncio:Using selector: EpollSelector
+DEBUG:asyncio:Using selector: EpollSelector

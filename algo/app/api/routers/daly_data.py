@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 
-from algo.app.db import pgsql
+from app.db import pgsql
 
 router = APIRouter()
 

@@ -1,0 +1,22 @@
+<!--
+ * @Date: 2024-08-28 19:34:20
+ * @LastEditors: 牛智超
+ * @LastEditTime: 2024-08-28 19:34:31
+ * @FilePath: \国金项目\algo\在网上找的代码\web服务器demo\DjangoDemo\mysite\books\templates\books\index.html
+-->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Books</title>
+</head>
+<body>
+    <h1>Books</h1>
+    <ul>
+        {% for book in books %}
+        <li>{{ book.title }} by {{ book.author }} ({{ book.pub_date }})</li>
+        {% empty %}
+        <li>No books available.</li>
+        {% endfor %}
+    </ul>
+</body>
+</html>

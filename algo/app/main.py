@@ -3,14 +3,14 @@ import os
 import sys
 
 from starlette.middleware.cors import CORSMiddleware
-
-from algo.app.api.routers import daly_data
-from algo.app.main_s import watch_data_history
-
 # 获取当前文件的目录路径并添加到 sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.append(parent_dir)
+
+from app.api.routers import daly_data
+from app.main_s import watch_data_history
+
 import queue
 import socket
 import threading
