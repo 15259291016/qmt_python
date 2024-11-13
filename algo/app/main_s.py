@@ -155,6 +155,8 @@ def question_wc(question):
 
 
 def wencai_():
+    public_obj = {'code_list': [],
+                  }
     def brain_think(res, ideal):
         """
         分析数据
@@ -358,7 +360,7 @@ def wencai_():
         print_(res)
 
     current_time = datetime.now().time()
-    start_time = time(9, 10)
+    start_time = time(9, 28)
     end_time = time(9, 30)
 
     while True:
@@ -366,7 +368,7 @@ def wencai_():
             ideals = ['9:20之前的竞价出现涨跌停价挂单加分,剔除ST',
                       '9:20~9:25期间,撮合价格逐步走高,同时伴随着成交量的放大,且以密集红柱为主。最后两分钟内大资金强吃货,且最终竞价涨幅在3%~7%之间，剔除ST',
                       '9:30前,有巨单挂过涨跌停价,个股形态完好,前几日分时有过异动或者有过涨停,开始股价涨停 ,竞价过程中撮合价格慢慢走低,但成交量有效放大,并且承接很好,主买盘为主', ]
-            sleep_time = 60
+            sleep_time = 6000
         else:
             # 市值小于50亿
             ideals = [
@@ -385,7 +387,7 @@ def wencai_():
                 # '业绩预增大于20%,机构评级看多,近期大股东没有减持,',
                 # '龙虎榜净买入,昨日放量上涨,短期趋势向上,近期大股东没有减持,',
             ]
-            sleep_time = 600
+            sleep_time = 6000
         current_time = datetime.now().time()
         time1 = time(9, 26)
         time2 = time(11, 30)

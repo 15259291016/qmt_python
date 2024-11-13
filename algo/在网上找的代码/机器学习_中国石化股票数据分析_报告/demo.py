@@ -5,6 +5,10 @@ import statsmodels.api as sm
 from sqlalchemy import create_engine
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import os
+import matplotlib
+
+
+matplotlib.use('TkAgg')
 
 # 设置显示选项，避免输出被省略
 pd.set_option('display.max_rows', None)
@@ -26,18 +30,10 @@ if not os.path.exists(output_dir):
 # file_path = '中国石化.xlsx'
 # df = pd.read_excel(file_path)
 
-# 导入tushare
-import tushare as ts
 
-# 初始化pro接口
-pro = ts.pro_api('7c0f63e6190327ab6c42d10e24abbab4863d721abc5f76b67a06a020')
-engine = create_engine('postgresql://postgres:611698@localhost:5432/data')
-# 定义 SQL 查询语句
-query = "SELECT * FROM 个股资金流向"
-
-# 执行查询并将结果读取到 DataFrame
-df = pd.read_sql_query(query, engine)
-# 数据基本信息检查
+# 加载数据
+file_path = '韵达股份.csv'
+df = pd.read_csv(file_path)
 print("数据基本信息:")
 df.info()
 
@@ -61,19 +57,36 @@ def convert_to_billion(value):
 
 
 # 选定要转换的列
-columns_to_convert = df.columns[2:]
+columns_to_convert = df.columns[3:]
 
 # 遍历每一列进行转换
-for col in columns_to_convert:
-    df[col] = df[col].apply(convert_to_billion)
+# for col in columns_to_convert:
+#     df[col] = df[col].apply(convert_to_billion)
 
 # 数据排序，确保按时间顺序排列
-df = df.sort_values(by='日期')
-
+df = df.sort_values(by='trade_date')
 # 数据统计描述
 print("\n数据统计描述:")
 print(df.describe().applymap(lambda x: f"{x:.2f}"))
-
+df.rename(
+    columns={
+        "trade_date": "日期",
+        "pct_change": "涨跌幅",
+        "close": "收盘价",
+        "net_amount": "主力净流入额",
+        "net_amount_rate": "主力净流入净占比",
+        "buy_elg_amount": "超大单净流入额",
+        "buy_elg_amount_rate": "超大单净流入占比",
+        "buy_lg_amount": "大单净流入额",
+        "buy_lg_amount_rate": "大单净流入占比",
+        "buy_md_amount": "中单净流入额",
+        "buy_md_amount_rate": "中单净流入占比",
+        "buy_sm_amount": "小单净流入额",
+        "buy_sm_amount_rate": "小单净流入占比"
+    },
+    inplace=True
+)
+df.drop(columns=['ts_code', 'name'], inplace=True)
 # 数据可视化分析
 plt.figure(figsize=(12, 6))
 plt.plot(df['日期'], df['收盘价'], label='收盘价', color='blue')
@@ -86,30 +99,30 @@ plt.savefig(os.path.join(output_dir, '收盘价走势.png'))
 plt.close()
 
 plt.figure(figsize=(12, 6))
-plt.plot(df['日期'], df['主力净流入净额'], label='主力净流入净额', color='green')
+plt.plot(df['日期'], df['主力净流入额'], label='主力净流入额', color='green')
 plt.xlabel('日期')
-plt.ylabel('主力净流入净额（亿元）')
-plt.title('主力净流入净额走势')
+plt.ylabel('主力净流入额')
+plt.title('主力净流入额走势')
 plt.legend()
 plt.grid(True)
-plt.savefig(os.path.join(output_dir, '主力净流入净额走势.png'))
+plt.savefig(os.path.join(output_dir, '主力净流入额走势.png'))
 plt.close()
 
 # 数据分布分析
 plt.figure(figsize=(12, 6))
 sns.histplot(df['收盘价'], kde=True, color='blue')
 plt.title('收盘价分布')
-plt.xlabel('收盘价（元）')
+plt.xlabel('收盘价')
 plt.ylabel('频率')
 plt.savefig(os.path.join(output_dir, '收盘价分布.png'))
 plt.close()
 
 plt.figure(figsize=(12, 6))
-sns.histplot(df['主力净流入净额'], kde=True, color='green')
-plt.title('主力净流入净额分布')
-plt.xlabel('主力净流入净额（亿元）')
+sns.histplot(df['主力净流入额'], kde=True, color='green')
+plt.title('主力净流入额分布')
+plt.xlabel('主力净流入额')
 plt.ylabel('频率')
-plt.savefig(os.path.join(output_dir, '主力净流入净额分布.png'))
+plt.savefig(os.path.join(output_dir, '主力净流入额分布.png'))
 plt.close()
 
 # 相关性分析
@@ -121,13 +134,15 @@ plt.savefig(os.path.join(output_dir, '相关性矩阵.png'))
 plt.close()
 
 # 选择相关特征列，假设存在‘收盘价’列
-features = ['涨跌幅', '主力净流入净额', '主力净流入净占比', '超大单净流入净额', '超大单净流入净占比',
-            '大单净流入净额', '大单净流入净占比', '中单净流入净额', '中单净流入净占比', '小单净流入净额',
-            '小单净流入净占比']
+features = ['涨跌幅', '主力净流入额', '主力净流入净占比', '超大单净流入额', '超大单净流入占比',
+            '大单净流入额', '大单净流入占比', '中单净流入额', '中单净流入占比', '小单净流入额',
+            '小单净流入占比']
 target = '收盘价'
 
 # 分离特征和目标
-
+# 分离特征和目标
+X = df[features]
+y = df[target]
 
 # 添加常数项
 X_const = sm.add_constant(X)
@@ -203,8 +218,8 @@ print(vif_data)
 
 # 回归诊断图
 fig = plt.figure(figsize=(12, 8))
-fig = sm.graphics.plot_regress_exog(model, '主力净流入净额', fig=fig)
-plt.savefig(os.path.join(output_dir, '回归诊断图_主力净流入净额.png'))
+fig = sm.graphics.plot_regress_exog(model, '主力净流入额', fig=fig)
+plt.savefig(os.path.join(output_dir, '回归诊断图_主力净流入额.png'))
 plt.close()
 
 fig = plt.figure(figsize=(12, 8))

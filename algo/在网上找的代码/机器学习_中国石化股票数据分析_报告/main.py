@@ -4,6 +4,8 @@ import seaborn as sns
 import statsmodels.api as sm
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 import os
+import matplotlib
+matplotlib.use('TkAgg')
 
 # 设置显示选项，避免输出被省略
 pd.set_option('display.max_rows', None)

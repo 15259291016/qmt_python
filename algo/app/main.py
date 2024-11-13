@@ -3,6 +3,9 @@ import os
 import sys
 
 from starlette.middleware.cors import CORSMiddleware
+
+from algo.app.main_s import wencai_
+
 # 获取当前文件的目录路径并添加到 sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir))
@@ -78,7 +81,7 @@ if __name__ == '__main__':
     # brain_thread_list.append(threading.Thread(target=brain_analyse_SH, args=()))           # 主力资金
     brain_thread_list.append(threading.Thread(target=watch_data_history, args=()))                 # 监控数据
     # brain_thread_list.append(threading.Thread(target=download_png_csv, args=()))           # 收集数据
-    # brain_thread_list.append(threading.Thread(target=wencai_, args=()))             # 问财
+    brain_thread_list.append(threading.Thread(target=wencai_, args=()))             # 问财
     # brain_thread_list.append(threading.Thread(target=myServer, args=("localhost", 8083,)))
     # brain_thread_list.append(threading.Thread(target=myAnalyse, args=(message_queue,)))
     for i in brain_thread_list:

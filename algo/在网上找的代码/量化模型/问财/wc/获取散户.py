@@ -12,4 +12,4 @@ class WC:
         pass
 
 
-print(WC().get_single_stock_sh('启迪环境'))
+print(WC().get_single_stock_sh('我爱我家'))
