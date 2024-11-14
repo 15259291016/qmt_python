@@ -1,7 +1,7 @@
 import logging
 
-from app.db import pgsql
-from app.db.pgsql import WatchCode
+from db import pgsql
+from db.pgsql import WatchCode
 from datetime import datetime, timedelta, time
 import os
 import sys
@@ -139,6 +139,7 @@ def code_list_to_csv(code_list: list):
 
 
 def question_wc(question):
+    wc_cookie = 'other_uid=Ths_iwencai_Xuangu_vt1m3hjjud764awfezv3ezly4t2f9xco; ta_random_userid=38r3s4iaao; PHPSESSID=670fb84a8754b3555e226c6b40c1d831; cid=670fb84a8754b3555e226c6b40c1d8311712721082; ComputerID=670fb84a8754b3555e226c6b40c1d8311712721082; WafStatus=0; u_ukey=A10702B8689642C6BE607730E11E6E4A; u_uver=1.0.0; u_dpass=HDZXnLqPSJ%2FMpvbRfnHhizBr0Y9TGLpA9wXLLjwsvQ09AWJ2DoZsyKUcGwEmAARD%2FsBAGfA5tlbuzYBqqcUNFA%3D%3D; u_did=ED35F01A88274FB59C3D3D607D30FEF0; u_ttype=WEB; ttype=WEB; user=MDptb181NjI3MjgwNzU6Ok5vbmU6NTAwOjU3MjcyODA3NTo3LDExMTExMTExMTExLDQwOzQ0LDExLDQwOzYsMSw0MDs1LDEsNDA7MSwxMDEsNDA7MiwxLDQwOzMsMSw0MDs1LDEsNDA7OCwwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMSw0MDsxMDIsMSw0MDoyNDo6OjU2MjcyODA3NToxNzEyNzIxMTIyOjo6MTYxMDkyNDk0MDo0MDAwNzg6MDoxNTljOTE4ODcwNDMzZjVlZDBhYTA5YWUzZWZiMDZhN2M6ZGVmYXVsdF80OjE%3D; userid=562728075; u_name=mo_562728075; escapename=mo_562728075; ticket=c35f5ff9817c2eee41b92f1a856ae0aa; user_status=0; utk=4261b365b2919c25775389e81aabe8e0; v=Az9jBtnQZWCRhWF8zdmzVs3XzhjMJJPPrXiXutEM2-414FHG2fQjFr1IJwbi'
     res = None
     try:
         res = wc.get(query=question, cookie=wc_cookie)
@@ -364,61 +365,63 @@ def wencai_():
     end_time = time(9, 30)
 
     while True:
-        if start_time <= current_time <= end_time:
-            ideals = ['9:20之前的竞价出现涨跌停价挂单加分,剔除ST',
-                      '9:20~9:25期间,撮合价格逐步走高,同时伴随着成交量的放大,且以密集红柱为主。最后两分钟内大资金强吃货,且最终竞价涨幅在3%~7%之间，剔除ST',
-                      '9:30前,有巨单挂过涨跌停价,个股形态完好,前几日分时有过异动或者有过涨停,开始股价涨停 ,竞价过程中撮合价格慢慢走低,但成交量有效放大,并且承接很好,主买盘为主', ]
-            sleep_time = 6000
-        else:
-            # 市值小于50亿
-            ideals = [
-                # '总市值大于等于20亿小于等于50亿,剔除ST,缩量,最近10个交易日有6个交易日以上主力资金净流入,最近3个交易日涨幅为正,资金净流入的股票,散户卖出,筹码高度集中,MACD大于0,最近3个交易日涨幅为正,rsi金叉，',
-                '市值大于100亿,放量,剔除ST,剔除次新,剔除北交所,拉升通道,最近20日放量,最近3个交易日涨幅为正,',
-                # '流通市值大于20亿元,市值小于100亿,散户持续卖出,放量,剔除ST,剔除次新,亿剔除次北交所,最近10个交易日有6个交易日以上主力资金净流入,最近3个交易日涨幅为正,rsi金叉',
-                '市值大于100亿,放量,不包括次新股,剔除ST,剔除次新,亿剔除次北交所,股票市场不包括北交所,散户卖出,最近3个交易日涨幅为正,',
-                # '机构净额大于500万,关注度高,近期热门板块,散户卖出,最近3个交易日涨幅为正,,',
-                '市值大于100亿,亿剔除次新股,拉升通道,股票市场只包括创业板,MACD大于0,资金流入,最近20日放量,最近3个交易日涨幅为正,',
-                '市值大于100亿,拉升通道,仅创业板,MACD大于0,筹码高度集中,资金流入,',
-                'rsi金叉，总市值大于100亿，拉升通道,',
-                'dde大单净额>100万，散户数量减少，量比>0.8，振幅>3%，流通市值大于等于20亿小于等于50亿，boll突破中轨，拉升通道',
-                '20天内有过涨停，阳包阴，当日振幅前100，放量，上升通道，',
-                # AI模型精选优质股
-                # '小盘股(流通市值小于100亿),日线放量上涨,macd提示买入,近期大股东没有减持,',
-                # '业绩预增大于20%,机构评级看多,近期大股东没有减持,',
-                # '龙虎榜净买入,昨日放量上涨,短期趋势向上,近期大股东没有减持,',
-            ]
-            sleep_time = 6000
+        # if start_time <= current_time <= end_time:
+        ideals = ['9:20之前的竞价出现涨跌停价挂单加分,剔除ST',
+                    '9:20~9:25期间,撮合价格逐步走高,同时伴随着成交量的放大,且以密集红柱为主。最后两分钟内大资金强吃货,且最终竞价涨幅在3%~7%之间，剔除ST',
+                    '9:30前,有巨单挂过涨跌停价,个股形态完好,前几日分时有过异动或者有过涨停,开始股价涨停 ,竞价过程中撮合价格慢慢走低,但成交量有效放大,并且承接很好,主买盘为主', ]
+        sleep_time = 1800
+        # else:
+        #     # 市值小于50亿
+        #     ideals = [
+        #         # '总市值大于等于20亿小于等于50亿,剔除ST,缩量,最近10个交易日有6个交易日以上主力资金净流入,最近3个交易日涨幅为正,资金净流入的股票,散户卖出,筹码高度集中,MACD大于0,最近3个交易日涨幅为正,rsi金叉，',
+        #         '市值大于100亿,放量,剔除ST,剔除次新,剔除北交所,拉升通道,最近20日放量,最近3个交易日涨幅为正,',
+        #         # '流通市值大于20亿元,市值小于100亿,散户持续卖出,放量,剔除ST,剔除次新,亿剔除次北交所,最近10个交易日有6个交易日以上主力资金净流入,最近3个交易日涨幅为正,rsi金叉',
+        #         '市值大于100亿,放量,不包括次新股,剔除ST,剔除次新,亿剔除次北交所,股票市场不包括北交所,散户卖出,最近3个交易日涨幅为正,',
+        #         # '机构净额大于500万,关注度高,近期热门板块,散户卖出,最近3个交易日涨幅为正,,',
+        #         '市值大于100亿,亿剔除次新股,拉升通道,股票市场只包括创业板,MACD大于0,资金流入,最近20日放量,最近3个交易日涨幅为正,',
+        #         '市值大于100亿,拉升通道,仅创业板,MACD大于0,筹码高度集中,资金流入,',
+        #         'rsi金叉，总市值大于100亿，拉升通道,',
+        #         'dde大单净额>100万，散户数量减少，量比>0.8，振幅>3%，流通市值大于等于20亿小于等于50亿，boll突破中轨，拉升通道',
+        #         '20天内有过涨停，阳包阴，当日振幅前100，放量，上升通道，',
+        #         # AI模型精选优质股
+        #         # '小盘股(流通市值小于100亿),日线放量上涨,macd提示买入,近期大股东没有减持,',
+        #         # '业绩预增大于20%,机构评级看多,近期大股东没有减持,',
+        #         # '龙虎榜净买入,昨日放量上涨,短期趋势向上,近期大股东没有减持,',
+        #     ]
+        #     sleep_time = 6000
         current_time = datetime.now().time()
-        time1 = time(9, 26)
+        time1 = time(9, 28)
         time2 = time(11, 30)
         time3 = time(13, 0)
         time4 = time(15, 10)
         thread_list = []
         if time1 <= current_time <= time2 or time3 <= current_time <= time4:  # 程序9.26分-11.30分,13.00-15.10运行时间
-            # if time3 <= current_time <= time4:  # 程序9.26分-11.30分,13.00-15.10运行时间
+            # if time3 <= current_time <= time4:  # 程序9.28分-11.30分,13.00-15.10运行时间
             # if True:            # 程序9.10分-11.30分,13.00-15.10运行时间
             for ideal in ideals:
                 print_(ideal)
                 try:
                     res = wc.get(query=ideal)
+                    print_(res)
                 except Exception as e:
                     webbrowser.open('https://www.iwencai.com/unifiedwap/reptile.html?returnUrl=https%3A%2F%2Fwww.iwencai.com%2Funifiedwap%2Fhome%2Findex%3Fsign%3D1709793871013&sessionId=117.30.119.18&antType=unifiedwap')
                     print_(e)
                     t.sleep(15)
                     continue
-                print_(res)
-                if res is not None:
-                    if '散户卖出' in ideal:
-                        thead = threading.Thread(target=brain_think_private_investor, args=(res, ideal))
-                        thread_list.append(thead)
-                        thead.start()
-                        # brain_think_private_investor(res, ideal)
-                    elif '升' in ideal:
-                        thead = threading.Thread(target=brain_think_ascending_channel, args=(res, ideal))
-                        thread_list.append(thead)
-                        thead.start()
-                    else:
-                        brain_think(res, ideal)
+                t.sleep(1)
+                # if res is not None:
+                #     if '散户卖出' in ideal:
+                #         thead = threading.Thread(target=brain_think_private_investor, args=(res, ideal))
+                #         thread_list.append(thead)
+                #         thead.start()
+                #         # brain_think_private_investor(res, ideal)
+                #     elif '升' in ideal:
+                #         thead = threading.Thread(target=brain_think_ascending_channel, args=(res, ideal))
+                #         thread_list.append(thead)
+                #         thead.start()
+                #     else:
+                #         brain_think(res, ideal)
+        print("break time")
         t.sleep(sleep_time)
         # public_obj['code_list'] = res.rename(columns={'股票代码': 'code', '股票简称': 'name', '最新价': 'price'}).loc[:, ['code', 'name', 'price']].drop_duplicates().to_dict(orient='records')
 
