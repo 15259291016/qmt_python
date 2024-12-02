@@ -1,9 +1,3 @@
-'''
-Date: 2024-08-27 11:55:24
-LastEditors: 牛智超
-LastEditTime: 2024-08-27 12:00:12
-FilePath: \国金项目\algo\在网上找的代码\设计模式\结构型模式\适配器模式\main.py
-'''
 # 目标
 class Appliance:
     def power_on(self, voltage):

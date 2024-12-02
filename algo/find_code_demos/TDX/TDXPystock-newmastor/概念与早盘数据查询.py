@@ -124,4 +124,4 @@ if __name__ == '__main__':
         print('parameters error!')
     #查早盘数据
     #dataselect(tablename1, name='科隆股份')  #r"name in('','','') "  //
-    #dataselect(tablename2, name='科隆股份')
+    dataselect(tablename2, name='韵达股份')

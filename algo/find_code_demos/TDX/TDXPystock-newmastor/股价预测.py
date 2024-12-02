@@ -258,7 +258,7 @@ class StockQuoteForward():
 if __name__ == '__main__':
     sq = StockQuoteForward()
     data = sq.getStockDatelQuote('600511', '20240601', '20240611')
-    sq.drawLine(data, '600511')
-    # table_head, table_data, stockData = sq.getHK_stockQuote('1765')
-    # print(table_data, stockData)
-    sq.get_Topjijin()
+    # sq.drawLine(data, '600511')
+    table_head, table_data, stockData = sq.getHK_stockQuote('1765')
+    print(table_data, stockData)
+    # sq.get_Topjijin()

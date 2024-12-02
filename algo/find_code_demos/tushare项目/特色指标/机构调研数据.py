@@ -23,5 +23,18 @@ df = pro.stk_surv(**{
     "org_type",
     "comp_rece"
 ])
+import os
+
+# 获取当前脚本的目录
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# 构建上一级目录的路径
+parent_dir = os.path.dirname(current_dir)
+
+# 构建目标路径
+target_path = os.path.join(parent_dir, 'data','特色指标', '机构调研数据.csv')
+
+# 保存DataFrame到CSV文件
+df.to_csv(target_path, index=False)
 print(df)
 
