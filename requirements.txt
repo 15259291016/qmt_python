@@ -62,3 +62,4 @@ python-dotenv==1.0.1
 easyquotation==0.7.5
 SQLAlchemy==2.0.20
 psycopg2-binary==2.9.9
+DrissionPage

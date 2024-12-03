@@ -17,16 +17,21 @@ for i in children:
     # time.sleep(1)
     # 获取并打印标签名、文本、href 属性
     url_name = i.attrs["data-symbol"]
-    print(url_name)
     data_symbol_list.append(url_name)
 
 
-for i in data_symbol_list:
-    tab.get(f"https://finance.sina.com.cn/realstock/company/{i}/nc.shtml")
-    # 在页面内查找元素
-    ele1 = tab.ele('#h5Container')
+for i in range(0, len(data_symbol_list)):
+    try:
+        print(i)
+        if data_symbol_list[i][0:2] == 'sh' or data_symbol_list[i][0:2] == 'sz':
+            tab.get(f"https://finance.sina.com.cn/realstock/company/{data_symbol_list[i]}/nc.shtml")
+            # 在页面内查找元素
+            ele1 = tab.ele('#h5Container')
 
-    # 在元素内查找后代元素
-    ele2 = ele1.ele('B/S点')
-    ele2.parent().click()
-    time.sleep(10)
+            # 在元素内查找后代元素
+            ele2 = ele1.ele('B/S点')
+            ele2.parent().click()
+            time.sleep(6)
+    except:
+        print("error")
+        continue
