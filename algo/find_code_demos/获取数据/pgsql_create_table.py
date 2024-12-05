@@ -120,6 +120,18 @@ table_definitions = {
         "data JSONB",
         "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
     ],
+    "company_info": [  # 新增表定义
+        "ts_code VARCHAR(10) NOT NULL PRIMARY KEY",   # 股票代码
+        "symbol VARCHAR(6)",                          # 简称代码
+        "name VARCHAR(50)",                           # 公司名称
+        "area VARCHAR(50)",                           # 地区
+        "industry VARCHAR(50)",                       # 行业
+        "cnspell VARCHAR(50)",                        # 拼音缩写
+        "market VARCHAR(20)",                         # 市场板块
+        "list_date DATE",                             # 上市日期
+        "act_name VARCHAR(100)",                      # 实际控制人姓名
+        "act_ent_type VARCHAR(50)"                    # 实际控制人类型
+    ]
 }
 
 # 批量创建表
