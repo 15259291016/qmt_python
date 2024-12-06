@@ -38,4 +38,4 @@ def save_stock_dde_data_all_today(df: pd.DataFrame):
     print(df)
     # df.to_sql(name="", con=engine, index=False, if_exists='replace')
 
-save_stock_dde_data_all_today(WC().get_stock_dde_info('嵘泰股份'))
+save_stock_dde_data_all_today(WC().get_stock_dde_info('华胜天成'))
