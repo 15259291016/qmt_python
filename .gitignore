@@ -1,4 +1,5 @@
 .idea/
+data/
 algo/app/files/*
 !algo/app/files/
 algo/app/stock/*
