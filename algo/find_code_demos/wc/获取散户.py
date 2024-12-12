@@ -15,6 +15,8 @@ class WC:
     
     def get_stock_dde_info(self, stock_name):
         return wc.get(query=f"{stock_name}散户指标")
+        # return wc.get(query=f"首板有哪些")
+        # return wc.get(query=f"主力资金流入,剔除ST,剔除次新,剔除北交所,形成拉升通道")
 
     def get_all_stock_list(self):
         pass
@@ -37,5 +39,7 @@ def save_stock_dde_data_all_today(df: pd.DataFrame):
     engine = create_engine(wc_data_url)
     print(df)
     # df.to_sql(name="", con=engine, index=False, if_exists='replace')
+# ['大连友谊', '中百集团', '兰州黄河', '河化股份']
+# [ ]:
 
-save_stock_dde_data_all_today(WC().get_stock_dde_info('华胜天成'))
+save_stock_dde_data_all_today(WC().get_stock_dde_info('嵘泰股份'))

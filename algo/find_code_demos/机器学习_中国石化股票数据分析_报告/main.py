@@ -22,7 +22,7 @@ if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
 # 加载数据
-file_path = '中国石化.xlsx'
+file_path = '/root/code/python/qmt_python/algo/find_code_demos/机器学习_中国石化股票数据分析_报告/中国石化.xlsx'
 df = pd.read_excel(file_path)
 
 # 数据基本信息检查
@@ -31,7 +31,6 @@ df.info()
 
 print("\n数据预览:")
 print(df.head())
-
 
 # 定义一个函数来转换数据
 def convert_to_billion(value):
@@ -123,7 +122,7 @@ X_const = sm.add_constant(X)
 
 # 使用OLS模型
 model = sm.OLS(y, X_const).fit()
-
+res = model.predict()
 # 打印模型方程
 print("\nOLS模型方程:")
 print(f"截距（const）：{model.params[0]:.4f}")

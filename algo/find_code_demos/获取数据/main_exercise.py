@@ -22,7 +22,7 @@ dbname = os.getenv("PG_DBNAME")
 wc_data_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}"
 engine = create_engine(wc_data_url)
 quotation = easyquotation.use('tencent')  # 新浪 ['sina'] 腾讯 ['tencent', 'qq']
-
+sh_num = 0
 data = {
     'trade_datetime': [],
     'now': [],  # 模拟收盘价数据
@@ -43,23 +43,29 @@ def is_trade_time():
     return False
 
 
-def print_now_info(stock_name, stock_code, interval):
+def save_now_info(stock_name, stock_code, interval):
+    global sh_num
     while True:
+        if is_trade_time() is False:
+            time.sleep(60)
+            continue
         stock_dde_info = WC().get_stock_dde_info(stock_name)
-        save_stock_dde_data_all_today(stock_dde_info, stock_code, stock_name)
+        # save_stock_dde_data_all_today(stock_dde_info, stock_code, stock_name)
+        sh_num = float(stock_dde_info["barline3"]["dde散户数量"].iloc[-1])
+        print(sh_num)
+        # df = pd.DataFrame(stock_dde_info)
+        # df.to_sql('easyquotation_trade_stock_data_sec', engine, if_exists='append', index=False)
         time.sleep(interval)
-
-def print_sh_info(stock_code, interval):
+        
+def save_sh_info(stock_name, stock_code, interval):
+    global sh_num
     while True:
+        if is_trade_time() is False:
+            time.sleep(60)
+            continue
         # 获取嵘泰股份公司的股价信息
         stock_data = quotation.real(stock_code)
-
-        # data["trade_datetime"].append(datetime.datetime.now())
-        # data["now"].append(stock_data[stock_code]['now'])
-        # data["涨跌(%)"].append(stock_data[stock_code]['涨跌(%)'])
-        # data["量比"].append(stock_data[stock_code]['量比'])
-        # data["均价"].append(stock_data[stock_code]['均价'])
-        print(stock_data[stock_code])
+        # print(stock_data[stock_code])
         rename_mapping = {
             'PE': 'pe',
             'PB': 'pb',
@@ -79,35 +85,17 @@ def print_sh_info(stock_code, interval):
         df = pd.DataFrame(renamed_data)
         # 将 DataFrame 写入到 PostgreSQL 数据库中的表
         df.to_sql('easyquotation_trade_stock_data_sec', engine, if_exists='append', index=False)
-
+        ef = pd.DataFrame([{"ts_code":stock_code,"now":stock_data[stock_code]['now'], "涨跌":stock_data[stock_code]['涨跌(%)'], "量比":stock_data[stock_code]['量比'],"均价":stock_data[stock_code]['均价']}])
+        ef.to_sql('trade_data', engine, if_exists='append', index=False)
+        print(f"{sh_num}---{stock_data[stock_code]['now']}, {stock_data[stock_code]['涨跌(%)']},{stock_data[stock_code]['量比']},{stock_data[stock_code]['均价']}")
         print("Data inserted successfully")
-        # print(f"当前价格: {stock_data[stock_code]['now']}, 涨跌幅: {stock_data[stock_code]['涨跌(%)']}, 量比: {stock_data[stock_code]['量比']}, 均价: {stock_data[stock_code]['均价']}")
         time.sleep(interval)
-df = pd.DataFrame(data)
 
-# 打印 DataFrame
-print(df)
-
-# 保存 DataFrame 为 CSV 文件
-df.to_csv('stock_data.csv', index=False)
-# print_now_info('嵘泰股份', '605133', 150)
 thread_list = []
-# thread_list.append(threading.Thread(target=print_now_info, args=('嵘泰股份', '605133', 150)))
-thread_list.append(threading.Thread(target=print_sh_info, args=('605133', 15)))
+thread_list.append(threading.Thread(target=save_now_info, args=('河化股份', '000953', 150)))
+thread_list.append(threading.Thread(target=save_sh_info, args=('河化股份','000953', 15)))
 for i in thread_list:
     i.start()
+    
+for i in thread_list:
     i.join()
-
-# data = wc.get(query="嵘泰股份")
-# print(data)
-# zlzj_his = data["历史主力资金流向"]['barline3']["主力资金"].sum() / 10000 # mvp fund flow unit: W
-# data["DDE散户数量变化"]["barline3"]["dde散户数量"].mean()
-# provide_pressure = data["kline2"]
-# data["估值指标"]["市盈率"]["labelLine"].iloc[-1][0]
-# data["估值指标"]["市销率"]["labelLine"].iloc[-1][0]
-# data["估值指标"]["市净率"]["labelLine"].iloc[-1][0]
-# data["十大股东持股比例"]["大股东名称"]
-
-
-
-
