@@ -38,7 +38,7 @@ def save_stock_dde_data_all_today(data: dict, stock_code: str, stock_name: str):
 
 def is_trade_time():
     now = time.localtime()
-    if (now.tm_hour == 9 and now.tm_min >= 15) or (now.tm_hour == 10) or (now.tm_hour == 11 and now.tm_min <= 30) or (now.tm_hour == 13) or (now.tm_hour == 14) or (now.tm_hour == 15 and now.tm_min == 0):
+    if (now.tm_hour == 9 and now.tm_min >= 24) or (now.tm_hour == 10) or (now.tm_hour == 11 and now.tm_min <= 30) or (now.tm_hour == 13) or (now.tm_hour == 14) or (now.tm_hour == 15 and now.tm_min == 0):
         return True
     return False
 
@@ -49,12 +49,15 @@ def save_now_info(stock_name, stock_code, interval):
         if is_trade_time() is False:
             time.sleep(60)
             continue
-        stock_dde_info = WC().get_stock_dde_info(stock_name)
-        # save_stock_dde_data_all_today(stock_dde_info, stock_code, stock_name)
-        sh_num = float(stock_dde_info["barline3"]["dde散户数量"].iloc[-1])
-        print(sh_num)
-        # df = pd.DataFrame(stock_dde_info)
-        # df.to_sql('easyquotation_trade_stock_data_sec', engine, if_exists='append', index=False)
+        try:
+            stock_dde_info = WC().get_stock_dde_info(stock_name)
+            # save_stock_dde_data_all_today(stock_dde_info, stock_code, stock_name)
+            sh_num = float(stock_dde_info["barline3"]["dde散户数量"].iloc[-1])
+            print(sh_num)
+            # df = pd.DataFrame(stock_dde_info)
+            # df.to_sql('easyquotation_trade_stock_data_sec', engine, if_exists='append', index=False)
+        except Exception as e:
+            print(f"Error: {e}")
         time.sleep(interval)
         
 def save_sh_info(stock_name, stock_code, interval):
@@ -63,6 +66,7 @@ def save_sh_info(stock_name, stock_code, interval):
         if is_trade_time() is False:
             time.sleep(60)
             continue
+        
         # 获取嵘泰股份公司的股价信息
         stock_data = quotation.real(stock_code)
         # print(stock_data[stock_code])
@@ -92,8 +96,8 @@ def save_sh_info(stock_name, stock_code, interval):
         time.sleep(interval)
 
 thread_list = []
-thread_list.append(threading.Thread(target=save_now_info, args=('河化股份', '000953', 150)))
-thread_list.append(threading.Thread(target=save_sh_info, args=('河化股份','000953', 15)))
+thread_list.append(threading.Thread(target=save_now_info, args=('河化股份', '000953', 60)))
+thread_list.append(threading.Thread(target=save_sh_info, args=('河化股份','000953', 3)))
 for i in thread_list:
     i.start()
     
