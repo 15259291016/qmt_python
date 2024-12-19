@@ -11,12 +11,17 @@ class WC:
         self.data_dict = {
             "0":["散户指标", self.shzb],
             "1":["主板且非st，流通市值>12亿且<150亿，昨日涨停，今日的前10日的区间涨幅<25,今日的前10日的涨幅>9.8的次数<2,今日竞价量比>12，竞价金额>1500万，今日竞价涨幅<9.8,竞价量/自由流通股<0.022,今日特大单净量>-0.12,今日特大单净额>-2000万，主力控盘比例>20,", self.deal],      #需要情绪周期配合
+            "2":["引力传媒、中材节能、日丰股份、宝胜股份、日上集团、麟盛科技、瑞芯微、川发龙蟒、威尔泰、莱茵体育、华胜天成、精伦电子、", self.f3],      #需要情绪周期配合
                      }
     def shzb(self, info:str, stock_name:str):
         print(pywc.get(query=f"{stock_name}散户指标"))
         
-    def deal(info:str):
+    def deal(self, info:str):
         print(pywc.get(query=info))
+
+    def f3(self, stock:str):
+        df = pywc.get(query=f"{stock}散户指标")
+        print(df)
 
     def get_single_stock_sh(self):
         return wc.get(query=f"散户指标排名5500-5600")
@@ -56,4 +61,5 @@ def save_stock_dde_data_all_today(df: pd.DataFrame):
 # save_stock_dde_data_all_today(WC().get_stock_dde_info('晶雪节能'))
 
 wc = WC()
-wc.data_dict["0"][1](wc.data_dict["0"][0], "友阿股份")
+# wc.data_dict["0"][1](wc.data_dict["0"][0], "友阿股份")
+wc.data_dict["2"][1](wc.data_dict["2"][0])
