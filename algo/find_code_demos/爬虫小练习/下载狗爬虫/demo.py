@@ -29,7 +29,7 @@ tab1.ele("#get_login").click('js')
 def consumer(tab1, q):
     while True:
         word_list = q.get()
-        time.sleep(0.5)
+        time.sleep(1)
         tab1.ele("#urlInput").input(word_list)
         # tab1.wait.load_start()  # 等待页面进入加载状态
         tab1.ele("#downloadButton").click('js')

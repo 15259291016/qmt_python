@@ -5,14 +5,14 @@ import requests
 import json
 import time
 import uvicorn
-# 创建 FastAPI 应用实例
-app = FastAPI()
-
-
+import pywencai as pywc
 from queue import Queue
 from DrissionPage import ChromiumPage, ChromiumOptions
 from threading import Thread
 import time
+
+# 创建 FastAPI 应用实例
+app = FastAPI()
 co = ChromiumOptions().auto_port()  # 指定程序每次使用空闲的端口和临时用户文件夹创建浏览器
 co.headless(True)  # 无头模式
 co.set_argument('--no-sandbox')  # 无沙盒模式
@@ -37,32 +37,61 @@ tab1.ele("#account").input("19026045487")
 tab1.ele("#password").input("6116988.niu")
 tab1.ele("#imgCode").input(a)
 tab1.ele("#get_login").click('js')
+tab1.wait.doc_loaded()
 def consumer(tab1, q):
     while True:
         word_list = q.get()
-        time.sleep(0.5)
-        tab1.ele("#urlInput").input(word_list)
-        # tab1.wait.load_start()  # 等待页面进入加载状态
-        tab1.ele("#downloadButton").click('js')
-        tab1.wait.load_start()  # 等待页面进入加载状态
-        # time.sleep(10)
-        source = tab1.ele('tag:source')
-        res["a"] = source.attr("src")
+        count = 0
+        tab1.ele("#button-addon2").click('js')          # 清楚输入框
+        tab1.ele("#urlInput").input(word_list)          # 输入查询条件
+        def pac(tab1):
+            tab1.ele("#downloadButton").click('js')         # 点击查询
+            tab1.wait.ele_hidden("#waitAnimation")          # 等待查询结果        
+            time.sleep(1)    
+            # tab1.wait.load_start()  # 等待页面进入加载状态
+            # time.sleep(10)
+            source = tab1.ele('tag:source')
+            images = tab1.eles('.preview-image')
+            if source:
+                res["a"] = {"videourl": source.attr("src"), "type": "video"}
+            if images:
+                res["a"] = {"imagesurl": [image.attr("src") for image in images], "type": "image"}
+        while "a" not in res and count < 5:
+            count += 1
+            pac(tab1)
+            
         print(res["a"])
         time.sleep(10)
 
-async def get_data():
-    global q
-    q.put("5.38 复制打开抖音，看看【草帽小子yyds的作品】相应国家号召 做小做新做科技做重组 onepiec... https://v.douyin.com/iDs54kV6/ aNW:/ 04/13 X@Z.mQ ")
 
 # 创建一个 POST 接口来接收 User 数据
 @app.post("/pc")
 async def pc(item: Dict[str, Any]):
-    await get_data()
-    return {"user": item}
+    info = item.get("user", "")
+    if info == "":
+        return {"error": "User info is empty!"}
+    global q
+    q.put(info)
+    while True:
+        if "a" in res:
+            re = res["a"]
+            res.pop("a")
+            return {
+                "data": re
+                }
+        time.sleep(0.1)
+
+
+@app.post("/wc")
+async def wc(item: Dict[str, Any]):
+    stock_name = item['params'].get("stock_name", "")
+    res = pywc.get(query=f"{stock_name}散户指标")
+    return {
+        "data": str(res)
+        }
 
 # 运行应用程序的命令
 if __name__ == "__main__":
     # 绑定特定的 IP 地址和端口
-    Thread(target=consumer, args=(tab1,q)).start()
+    Thread(target=consumer, args=(tab1,q)).start()          # chrome浏览器
     uvicorn.run(app, host="0.0.0.0", port=8000)
