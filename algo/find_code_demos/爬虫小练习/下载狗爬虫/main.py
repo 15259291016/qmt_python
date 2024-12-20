@@ -46,6 +46,7 @@ def consumer(tab1, q):
         tab1.ele("#urlInput").input(word_list)          # 输入查询条件
         def pac(tab1):
             tab1.ele("#downloadButton").click('js')         # 点击查询
+            tab1.wait.doc_loaded()
             tab1.wait.ele_hidden("#waitAnimation")          # 等待查询结果        
             time.sleep(1)    
             # tab1.wait.load_start()  # 等待页面进入加载状态
@@ -60,7 +61,7 @@ def consumer(tab1, q):
             count += 1
             pac(tab1)
             
-        print(res["a"])
+        # print(res["a"])
         time.sleep(10)
 
 
@@ -86,6 +87,14 @@ async def pc(item: Dict[str, Any]):
 async def wc(item: Dict[str, Any]):
     stock_name = item['params'].get("stock_name", "")
     res = pywc.get(query=f"{stock_name}散户指标")
+    return {
+        "data": str(res)
+        }
+    
+@app.post("/tjwc")
+async def tjwc(item: Dict[str, Any]):
+    info = item['params'].get("info", "")
+    res = pywc.get(query=f"{info}")
     return {
         "data": str(res)
         }
