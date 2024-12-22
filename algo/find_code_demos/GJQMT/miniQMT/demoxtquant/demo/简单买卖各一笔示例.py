@@ -95,7 +95,8 @@ if __name__ == '__main__':
     print("start")
     # 指定客户端所在路径, 券商端指定到 userdata_mini文件夹
     # 注意：如果是连接投研端进行交易，文件目录需要指定到f"{安装目录}\userdata"
-    path = r'D:\qmt\投研\迅投极速交易终端睿智融科版\userdata'
+    # path = r'D:\qmt\投研\迅投极速交易终端睿智融科版\userdata'
+    path = r'H:\Program Files (x86)\国金证券QMT交易端\userdata'
     # 生成session id 整数类型 同时运行的策略不能重复
     session_id = int(time.time())
     xt_trader = XtQuantTrader(path, session_id)
@@ -104,7 +105,7 @@ if __name__ == '__main__':
     # xt_trader.set_relaxed_response_order_enabled(True)
 
     # 创建资金账号为 800068 的证券账号对象 股票账号为STOCK 信用CREDIT 期货FUTURE
-    acc = StockAccount('2000128', 'STOCK')
+    acc = StockAccount('8881667160', 'STOCK')
     # 创建交易回调类对象，并声明接收回调
     callback = MyXtQuantTraderCallback()
     xt_trader.register_callback(callback)
