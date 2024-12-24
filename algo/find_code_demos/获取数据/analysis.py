@@ -19,7 +19,28 @@ def is_trade_time():
     return False
 
 
-def save_sh_info(stock_name:list[str], interval):
+def save_sh_info(stock_name: list[str], interval):
+    """
+    获取并保存指定股票名称列表的股票信息，并按指定间隔时间更新。
+
+    参数:
+        stock_name (list[str]): 要获取信息的股票名称列表。
+        interval (int): 每次获取操作之间的时间间隔（以秒为单位）。
+
+    返回:
+        None
+
+    该函数执行以下步骤:
+    1. 将股票名称列表转换为股票代码列表。
+    2. 为每个股票代码初始化一个空的 DataFrame。
+    3. 按指定间隔时间连续获取实时股票数据。
+    4. 重命名获取数据中的某些列以保持一致性。
+    5. 计算 '涨跌'（价格变化）列的滚动最大值和最小值。
+    6. 根据滚动值生成买入和卖出信号。
+    7. 将新数据连接到每个股票代码的现有 DataFrame。
+    8. 打印最新的股票信息和买入/卖出信号。
+    9. 在再次获取数据之前按指定间隔时间休眠。
+    """ 
     stock_code_list = stock_names_to_list(stock_name)
     df_dict = {}
     for stock_code in stock_code_list:
@@ -31,7 +52,7 @@ def save_sh_info(stock_name:list[str], interval):
         #     time.sleep(60)
         #     continue
         # 获取嵘泰股份公司的股价信息
-        print(stock_code_list)
+        # print(stock_code_list)
         stock_data = quotation.real(stock_code_list)
         # stock_dataDF = pd.DataFrame(stock_data).T
         rename_mapping = {
@@ -77,13 +98,13 @@ def save_sh_info(stock_name:list[str], interval):
                 #     ef['signal_sell'] = np.where(ef['now'] == ef['rolling_max'], 'SELL', np.nan)
                 #     ef['signal_buy'] = np.where(ef['涨跌'] > ef['rolling_min'], 'BUY', np.nan)
                 # df = pd.concat([df, ef], ignore_index=True)
-                # jgcjl = renamed_data["价格成交量成交额"][0].split("/")
-                # print(f"{df['now'].iloc[-1]}, {df['涨跌'].iloc[-1]},{df['量比'].iloc[-1]},{df['均价'].iloc[-1]},{df['signal_sell'].iloc[-1]},{df['signal_buy'].iloc[-1]},{jgcjl[1]}, {int(jgcjl[1]) - cjbs}")
-                # if cjbs != int(jgcjl[1]):
-                #     cjbs = int(jgcjl[1])
-            print(df_dict[stock_code].tail(1))
-        print(df_dict)
-        print('-'*50)
+            jgcjl = renamed_data["价格成交量成交额"][0].split("/")
+            # print(f"{df['now'].iloc[-1]}, {df['涨跌'].iloc[-1]},{df['量比'].iloc[-1]},{df['均价'].iloc[-1]},{df['signal_sell'].iloc[-1]},{df['signal_buy'].iloc[-1]},{jgcjl[1]}, {int(jgcjl[1]) - cjbs}")
+            if cjbs != int(jgcjl[1]):
+                cjbs = int(jgcjl[1])
+            print(f'{ef["name"].iloc[-1]}:{ef["now"].iloc[-1]}||{ef["涨跌百分比"].iloc[-1]}-{ef["量比"].iloc[-1]}-{ef["rolling_max"].iloc[-1]}-{ef["rolling_min"].iloc[-1]}-{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}')
+        # print(df_dict)
+        print('-'*100)
         time.sleep(interval)
 
 save_sh_info(['嵘泰股份','宝胜股份','精伦电子','华胜天成', '中国核电', '国机精工', '电光科技', '小方制药', '中际旭创'], 3)
