@@ -48,11 +48,9 @@ def save_sh_info(stock_name: list[str], interval):
     df = None
     cjbs = 0
     while True:
-        # if is_trade_time() is False:
-        #     time.sleep(60)
-        #     continue
-        # 获取嵘泰股份公司的股价信息
-        # print(stock_code_list)
+        if is_trade_time() is False:
+            time.sleep(60)
+            continue
         stock_data = quotation.real(stock_code_list)
         # stock_dataDF = pd.DataFrame(stock_data).T
         rename_mapping = {
@@ -69,43 +67,27 @@ def save_sh_info(stock_name: list[str], interval):
             renamed_data = {rename_mapping.get(k, k): v for k, v in stock_data[stock_code].items()}
             for i in renamed_data.keys():
                 renamed_data[i] = [renamed_data[i]]
-            # 将 dict 转换为 DataFrame
             renamed_data["unknown"] = [1]
-            # renamed_data["最近逐笔成交"] = [0]
-            # print(renamed_data)
             ef = pd.DataFrame(renamed_data)
-            ef['rolling_max'] = ef['涨跌'].rolling(window=10, min_periods=1).max()
-            ef['rolling_min'] = ef['涨跌'].rolling(window=10, min_periods=1).min()
+            ef['rolling_max'] = ef['涨跌百分比']
+            ef['rolling_min'] = ef['涨跌百分比'].rolling(window=100, min_periods=1).min()
             if len(df_dict[stock_code])<=10:
                 ef['signal_sell'] = np.nan
                 ef['signal_buy'] = np.nan
                 df_dict[stock_code] = pd.concat([df_dict[stock_code], ef], ignore_index=True)
             else:
-                ef['signal_sell'] = np.where(ef['涨跌'] >= df_dict[stock_code]['rolling_max'].max(), 'SELL', np.nan)
-                ef['signal_buy'] = np.where(ef['涨跌'] > df_dict[stock_code]['rolling_min'].min(), 'BUY', np.nan)
+                ef['signal_sell'] = 'sell' if df_dict[stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max() - ef['涨跌百分比'].iloc[-1] >= 1.5 else np.nan
+                ef['signal_buy'] = 'buy' if ef['涨跌百分比'].iloc[-1] - df_dict[stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min() >= 1.5 else np.nan
                 df_dict[stock_code] = pd.concat([df_dict[stock_code], ef], ignore_index=True)
-            # if df is None:
-                # df = pd.DataFrame(pd.DataFrame([{"ts_code":stock_code,"now":stock_data[stock_code]['now'], "涨跌":stock_data[stock_code]['涨跌(%)'], "量比":stock_data[stock_code]['量比'],"均价":stock_data[stock_code]['均价']}]))
-            # else:
-                # ef = pd.DataFrame([{"ts_code":stock_code,"now":stock_data[stock_code]['now'], "涨跌":stock_data[stock_code]['涨跌(%)'], "量比":stock_data[stock_code]['量比'],"均价":stock_data[stock_code]['均价']}])
-                # # 计算滚动最高点
-                # ef['rolling_max'] = df['now'].rolling(window=10, min_periods=1).max()
-                # ef['rolling_min'] = df['涨跌'].rolling(window=10, min_periods=1).min()
-                # if len(df)>=10:
-                #     ef['signal_sell'] = np.where(ef['now'] > df['rolling_max'].max(), 'SELL', np.nan)
-                #     ef['signal_buy'] = np.where(ef['涨跌'] > df['rolling_min'].min() , 'BUY', np.nan)
-                # else:
-                #     ef['signal_sell'] = np.where(ef['now'] == ef['rolling_max'], 'SELL', np.nan)
-                #     ef['signal_buy'] = np.where(ef['涨跌'] > ef['rolling_min'], 'BUY', np.nan)
-                # df = pd.concat([df, ef], ignore_index=True)
             jgcjl = renamed_data["价格成交量成交额"][0].split("/")
-            # print(f"{df['now'].iloc[-1]}, {df['涨跌'].iloc[-1]},{df['量比'].iloc[-1]},{df['均价'].iloc[-1]},{df['signal_sell'].iloc[-1]},{df['signal_buy'].iloc[-1]},{jgcjl[1]}, {int(jgcjl[1]) - cjbs}")
             if cjbs != int(jgcjl[1]):
                 cjbs = int(jgcjl[1])
-            print(f'{ef["name"].iloc[-1]}:{ef["now"].iloc[-1]}||{ef["涨跌百分比"].iloc[-1]}-{ef["量比"].iloc[-1]}-{ef["rolling_max"].iloc[-1]}-{ef["rolling_min"].iloc[-1]}-{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}')
+            print(f'{ef["name"].iloc[-1]}:{ef["now"].iloc[-1]}||{ef["涨跌百分比"].iloc[-1]}-{ef["量比"].iloc[-1]}-{ef["均价"].iloc[-1]}' +
+                  f'-{df_dict[stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max()}' +
+                  f'-{df_dict[stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min()}-{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}')
         # print(df_dict)
         print('-'*100)
         time.sleep(interval)
 
-save_sh_info(['嵘泰股份','宝胜股份','精伦电子','华胜天成', '中国核电', '国机精工', '电光科技', '小方制药', '中际旭创'], 3)
+save_sh_info(['嵘泰股份', '宝胜股份', '精伦电子', '华胜天成', '中国核电', '国机精工', '电光科技', '小方制药', '中际旭创', '好想你', '长盛轴承'], 3)
 # 中国核电、国机精工、电光科技、小方制药、中际旭创
