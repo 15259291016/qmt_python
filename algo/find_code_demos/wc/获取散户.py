@@ -61,5 +61,5 @@ def save_stock_dde_data_all_today(df: pd.DataFrame):
 # save_stock_dde_data_all_today(WC().get_stock_dde_info('晶雪节能'))
 
 wc = WC()
-# wc.data_dict["0"][1](wc.data_dict["0"][0], "友阿股份")
-wc.data_dict["2"][1](wc.data_dict["2"][0])
+wc.data_dict["0"][1](wc.data_dict["0"][0], "来伊份")
+# wc.data_dict["2"][1](wc.data_dict["2"][0])

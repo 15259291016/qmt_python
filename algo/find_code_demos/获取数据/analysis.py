@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import easyquotation
 import tushare as ts
+import pywencai as pywc
+import threading
 
 from stock_names_to_list import stock_names_to_list
 
@@ -19,7 +21,7 @@ def is_trade_time():
     return False
 
 
-def save_sh_info(stock_name: list[str], interval):
+def watch_stock_tick(stock_name: list[str], interval):
     """
     获取并保存指定股票名称列表的股票信息，并按指定间隔时间更新。
 
@@ -41,12 +43,43 @@ def save_sh_info(stock_name: list[str], interval):
     8. 打印最新的股票信息和买入/卖出信号。
     9. 在再次获取数据之前按指定间隔时间休眠。
     """ 
-    stock_code_list = stock_names_to_list(stock_name)
-    df_dict = {}
-    for stock_code in stock_code_list:
-        df_dict[stock_code] = pd.DataFrame()
+    df_dict = {
+        'tick':{},
+        "sh":{},
+    }
     df = None
     cjbs = 0
+    sh_thread = None
+    def watch_sh_by_stocks_names(stock_names: list[str], interval, df_dict):
+        stock_code_list = stock_names_to_list(stock_names)
+        stock_e_c_name_dict = {stock_names[i]:stock_code_list[i] for i in range(len(stock_code_list))}
+        while True:
+            if is_trade_time() is False:
+                time.sleep(60)
+                continue
+            
+            stock_dde_info = pywc.get(query=f"{stock_names} 散户指标")
+            info_dict = [stock_dde_info[key] for key in stock_dde_info.keys()][0].T.to_dict()
+            for key in info_dict:
+                try:
+                    df_dict["sh"][stock_e_c_name_dict[info_dict[key]['名称']]] = info_dict[key]['dde散户数量']
+                except Exception as e:
+                    print(e)
+                    continue
+            # [info_dict[key] for key in info_dict]
+            # sh_num = float(stock_dde_info["barline3"]["dde散户数量"].iloc[-1])
+            # print(info_dict)
+            # print(df_dict["sh"])
+            print("updated")
+            time.sleep(interval)
+            
+    if sh_thread is None:
+        sh_thread = threading.Thread(target=watch_sh_by_stocks_names, args=(stock_name, interval*10, df_dict))
+        sh_thread.start()  
+        
+    stock_code_list = stock_names_to_list(stock_name)
+    for stock_code in stock_code_list:
+        df_dict['tick'][stock_code] = pd.DataFrame()
     while True:
         if is_trade_time() is False:
             time.sleep(60)
@@ -71,23 +104,23 @@ def save_sh_info(stock_name: list[str], interval):
             ef = pd.DataFrame(renamed_data)
             ef['rolling_max'] = ef['涨跌百分比']
             ef['rolling_min'] = ef['涨跌百分比'].rolling(window=100, min_periods=1).min()
-            if len(df_dict[stock_code])<=10:
+            if len(df_dict['tick'][stock_code])<=10:
                 ef['signal_sell'] = np.nan
                 ef['signal_buy'] = np.nan
-                df_dict[stock_code] = pd.concat([df_dict[stock_code], ef], ignore_index=True)
+                df_dict['tick'][stock_code] = pd.concat([df_dict['tick'][stock_code], ef], ignore_index=True)
             else:
-                ef['signal_sell'] = 'sell' if df_dict[stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max() - ef['涨跌百分比'].iloc[-1] >= 1.5 else np.nan
-                ef['signal_buy'] = 'buy' if ef['涨跌百分比'].iloc[-1] - df_dict[stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min() >= 1.5 else np.nan
-                df_dict[stock_code] = pd.concat([df_dict[stock_code], ef], ignore_index=True)
+                ef['signal_sell'] = 'sell' if df_dict['tick'][stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max() - ef['涨跌百分比'].iloc[-1] >= 1.5 else np.nan
+                ef['signal_buy'] = 'buy' if ef['涨跌百分比'].iloc[-1] - df_dict['tick'][stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min() >= 1.5 else np.nan
+                df_dict['tick'][stock_code] = pd.concat([df_dict['tick'][stock_code], ef], ignore_index=True)
             jgcjl = renamed_data["价格成交量成交额"][0].split("/")
             if cjbs != int(jgcjl[1]):
                 cjbs = int(jgcjl[1])
             print(f'{ef["name"].iloc[-1]}:{ef["now"].iloc[-1]}||{ef["涨跌百分比"].iloc[-1]}-{ef["量比"].iloc[-1]}-{ef["均价"].iloc[-1]}' +
-                  f'-{df_dict[stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max()}' +
-                  f'-{df_dict[stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min()}-{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}')
+                  f'-{df_dict['tick'][stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max()}' +
+                  f'-{df_dict['tick'][stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min()}-{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}' +
+                  f'-{df_dict["sh"][stock_code] if stock_code in df_dict["sh"] else 0}')
         # print(df_dict)
         print('-'*100)
         time.sleep(interval)
-
-save_sh_info(['嵘泰股份', '宝胜股份', '精伦电子', '华胜天成', '中国核电', '国机精工', '电光科技', '小方制药', '中际旭创', '好想你', '长盛轴承'], 3)
+watch_stock_tick(['嵘泰股份', '宝胜股份', '哈森股份', '东峰集团', '广百股份', '欧菲光', '电光科技', '通富微电', '好想你', '长盛轴承'], 3)
 # 中国核电、国机精工、电光科技、小方制药、中际旭创
