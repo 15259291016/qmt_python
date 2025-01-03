@@ -6,7 +6,7 @@ pro = ts.pro_api('1e1642bf41b53b487916b343c3afadd224737579c64dc1b9ddae1539')
 
 # 拉取数据
 df = pro.ths_hot(**{
-    "trade_date": "20241230",
+    "trade_date": "20240102",
     "ts_code": "",
     "market": "",
     "is_new": "",
