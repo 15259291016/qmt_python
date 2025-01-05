@@ -52,7 +52,6 @@ def save_sh_info(stock_name: list[str], interval):
             time.sleep(60)
             continue
         stock_data = quotation.real(stock_code_list)
-        # stock_dataDF = pd.DataFrame(stock_data).T
         rename_mapping = {
             'PE': 'pe',
             'PB': 'pb',

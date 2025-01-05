@@ -130,3 +130,4 @@ if __name__ == '__main__':
     xt_trader.run_forever()
     # 如果使用vscode pycharm等本地编辑器 可以进入交互模式 方便调试 （把上一行的run_forever注释掉 否则不会执行到这里）
     interact()
+

@@ -142,8 +142,8 @@ if __name__ == '__main__':
     #买入数量 取整为100的整数倍
     buy_vol = int(buy_amount / current_price / 100) * 100
     print(f"当前可用资金 {available_cash} 目标买入金额 {target_amount} 买入股数 {buy_vol}股")
-    async_seq = xt_trader.order_stock_async(acc, stock, xtconstant.STOCK_BUY, buy_vol, xtconstant.FIX_PRICE, current_price,
-                                            'strategy_name', stock)
+    # async_seq = xt_trader.order_stock_async(acc, stock, xtconstant.STOCK_BUY, buy_vol, xtconstant.FIX_PRICE, current_price,
+    #                                         'strategy_name', stock)
 
     #卖出 500股
     stock = '513130.SH'
@@ -154,10 +154,10 @@ if __name__ == '__main__':
     #卖出量取目标量与可用量中较小的
     sell_vol = min(target_vol, available_vol)
     print(f"{stock} 目标卖出量 {target_vol} 可用数量 {available_vol} 卖出 {sell_vol}股")
-    if sell_vol > 0:
-        async_seq = xt_trader.order_stock_async(acc, stock, xtconstant.STOCK_SELL, sell_vol, xtconstant.LATEST_PRICE,
-                                                -1,
-                                                'strategy_name', stock)
+    # if sell_vol > 0:
+    #     async_seq = xt_trader.order_stock_async(acc, stock, xtconstant.STOCK_SELL, sell_vol, xtconstant.LATEST_PRICE,
+    #                                             -1,
+    #                                             'strategy_name', stock)
     print(f"下单完成 等待回调")
     # 阻塞主线程退出
     xt_trader.run_forever()
