@@ -1,12 +1,16 @@
+# 一天最多2次
 # 导入tushare
 import tushare as ts
 
+# 7c0f63e6190327ab6c42d10e24abbab4863d721abc5f76b67a06a020          # 15259291016
+# 4c3dc659f980eee492435040f724d384d032eb0bba7d50b8dc43c3b1          
+# 1e1642bf41b53b487916b343c3afadd224737579c64dc1b9ddae1539
 # 初始化pro接口
-pro = ts.pro_api('7c0f63e6190327ab6c42d10e24abbab4863d721abc5f76b67a06a020')
+pro = ts.pro_api('1e1642bf41b53b487916b343c3afadd224737579c64dc1b9ddae1539')
 
 # 拉取数据
 df = pro.dc_hot(**{
-    "trade_date": "20241107",
+    "trade_date": "20250102",
     "ts_code": "",
     "market": "",
     "hot_type": "",

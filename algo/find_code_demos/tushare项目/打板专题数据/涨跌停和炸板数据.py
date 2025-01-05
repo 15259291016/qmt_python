@@ -1,3 +1,4 @@
+# 每分钟1次
 # 导入tushare
 import tushare as ts
 
@@ -6,7 +7,7 @@ pro = ts.pro_api('7c0f63e6190327ab6c42d10e24abbab4863d721abc5f76b67a06a020')
 
 # 拉取数据
 df = pro.limit_list_d(**{
-    "trade_date": "20241107",
+    "trade_date": "20250102",
     "ts_code": "",
     "limit_type": "",
     "exchange": "",

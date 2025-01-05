@@ -3,7 +3,10 @@ csv_file_path = './algo/find_code_demos/tushare项目/data/基础数据/股票�
 df = pd.read_csv(csv_file_path)
 
 def stock_names_to_list(stock_names:list[str]):
-    return [i.split(".")[0] for i in df['ts_code'][df['name'].isin(stock_names)].tolist()]
+    result = []
+    for name in stock_names:
+        result.append(df['ts_code'][df['name'] == name].tolist()[0].split(".")[0])
+    return result
 
 
 if __name__ == '__main__':
