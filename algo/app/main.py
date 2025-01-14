@@ -42,7 +42,6 @@ from fastapi import FastAPI
 import logging
 
 from fastapi.staticfiles import StaticFiles
-
 from api.routers import stock_strategy, users
 
 load_dotenv()

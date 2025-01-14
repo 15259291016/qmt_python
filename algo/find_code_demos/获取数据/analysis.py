@@ -121,5 +121,5 @@ def watch_stock_tick(stock_name: list[str], interval):
         # print(df_dict)
         print('-'*100)
         time.sleep(interval)
-watch_stock_tick(['嵘泰股份', '宝胜股份', '哈森股份', '东峰集团', '广百股份', '欧菲光', '电光科技', '通富微电', '好想你', '长盛轴承'], 3)
 # 中国核电、国机精工、电光科技、小方制药、中际旭创
+watch_stock_tick(['嵘泰股份', '远程股份', '海鸥股份', '江海股份','好想你','三花智控','三六零','飞龙股份','元隆雅图','北特科技','奥飞娱乐'], 3)
