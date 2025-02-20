@@ -7,9 +7,9 @@ import pywencai as pywc
 # 获取并打印当前工作目录
 current_directory = os.getcwd()
 print("当前工作目录是:", current_directory)
+tab = Chromium().latest_tab
 df = pywc.get(query=f"人气个股排名")
 # 启动或接管浏览器，并创建标签页对象
-tab = Chromium().latest_tab
 # 跳转到登录页面
 tab.get('https://i.finance.sina.com.cn/zixuan,all')
 

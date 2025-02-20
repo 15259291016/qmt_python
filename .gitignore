@@ -10,3 +10,4 @@ algo/app/data/csv/*
 algo/data/*
 __pycache__/
 files/
+*/default.log

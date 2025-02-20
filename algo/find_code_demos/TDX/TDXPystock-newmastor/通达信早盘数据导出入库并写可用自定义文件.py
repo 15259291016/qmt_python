@@ -12,7 +12,7 @@ import random
 from pywinauto import application
 from pywinauto.application import *
 from pywinauto import mouse
-from dboprater import DB as db
+from app.dboprater import DB as db
 class opendatainTodb():
     database = 'stock'
     tablename = 'stockopendata'

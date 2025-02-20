@@ -5,7 +5,7 @@ import pandas as pds
 from pywinauto import application
 from pywinauto.application import *
 from pywinauto import mouse
-from dboprater import DB as db
+from app.dboprater import DB as db
 database='stock'
 tablename='stockopendata'
 configfile='./config/mysqlconfig.json'

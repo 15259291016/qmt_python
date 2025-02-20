@@ -1,7 +1,7 @@
 import logging
 
-from db import pgsql
-from db.pgsql import WatchCode
+from app.db import pgsql
+from app.db.pgsql import WatchCode
 from datetime import datetime, timedelta, time
 import os
 import sys
@@ -390,7 +390,7 @@ def wencai_():
         #     ]
         #     sleep_time = 6000
         current_time = datetime.now().time()
-        time1 = time(9, 28)
+        time1 = time(9, 15)
         time2 = time(11, 30)
         time3 = time(13, 0)
         time4 = time(15, 10)

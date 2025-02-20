@@ -8,7 +8,7 @@ import uuid
 import redis
 import os
 from flask_cors import CORS
-from dboprater import DB as db
+from app.dboprater import DB as db
 from 爱问财条件取数通用版 import *
 
 # 初始化Flask应用

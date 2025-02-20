@@ -122,4 +122,4 @@ def watch_stock_tick(stock_name: list[str], interval):
         print('-'*100)
         time.sleep(interval)
 # 中国核电、国机精工、电光科技、小方制药、中际旭创
-watch_stock_tick(['嵘泰股份', '远程股份', '海鸥股份', '江海股份','好想你','三花智控','三六零','飞龙股份','元隆雅图','北特科技','奥飞娱乐'], 3)
+watch_stock_tick(['嵘泰股份', '远程股份', '吉比特','春风动力', '可孚医疗','华北制药', '山东矿机'], 3)

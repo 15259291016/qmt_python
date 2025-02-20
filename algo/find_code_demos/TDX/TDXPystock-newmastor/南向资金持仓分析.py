@@ -3,7 +3,7 @@ import requests as req
 import json
 import prettytable as pt   #格式化成表格输出到html文件
 import time,sys,re
-from dboprater import DB as db
+from app.dboprater import DB as db
 from pyecharts.charts import Line
 from pyecharts import options as opts
 import tushare as ts

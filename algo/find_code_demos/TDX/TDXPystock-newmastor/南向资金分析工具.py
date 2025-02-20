@@ -20,7 +20,7 @@ from pyecharts.charts import Bar, Page, Line
 from pyecharts import options as opts
 from TradeDay import tradeday
 import akshare as ak  #api 使用：https://akshare-4gize6tod19f2d2e-1252952517.tcloudbaseapp.com/index.html
-from dboprater import DB as db
+from app.dboprater import DB as db
 
 '''手动安装 talib 去https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib 下载对应的版本“TA_Lib‑0.4.19‑cp37‑cp37m‑win_amd64.whl”  然后 pip3 install TA_Lib‑0.4.19‑cp37‑cp37m‑win_amd64.whl'''
 

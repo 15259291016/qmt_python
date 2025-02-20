@@ -2,7 +2,7 @@ import tushare as ts
 import json,datetime
 import pandas as pd
 import  pymysql
-from dboprater import DB as db
+from app.dboprater import DB as db
 configfile='./config/mysqlconfig.json'
 class tradeday:
     def __init__(self):

@@ -9,7 +9,6 @@ from pydantic import BaseModel
 from typing import Union, List, Optional
 from fastapi.responses import FileResponse
 # from dependencies import get_token_header
-import qstock as qs
 import pandas as pd
 import os
 import easyquotation
@@ -17,8 +16,6 @@ from pathlib import Path
 from sqlalchemy import text
 from fastapi import APIRouter
 from pydantic import BaseModel
-from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import and_
 

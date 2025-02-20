@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 from datetime import datetime
@@ -8,7 +7,6 @@ from app.db import pgsql
 
 router = APIRouter()
 
-
 class RecordOfTotalTurnover(BaseModel):
     id: Optional[int] = None
     transaction_time: datetime = None
@@ -17,7 +15,7 @@ class RecordOfTotalTurnover(BaseModel):
     northbound_outflow: float
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 @router.post("/records", tags=["新增交易信息数据"], response_model=RecordOfTotalTurnover)
 async def create_record(record: RecordOfTotalTurnover):

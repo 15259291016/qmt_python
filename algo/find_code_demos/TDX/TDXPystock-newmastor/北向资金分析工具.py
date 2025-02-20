@@ -19,7 +19,7 @@ from pyecharts import options as opts
 from pyecharts.charts import Page, Line
 from optparse import OptionParser
 from TradeDay import tradeday
-from dboprater import DB as db
+from app.dboprater import DB as db
 '''手动安装 talib 去https://www.lfd.uci.edu/~gohlke/pythonlibs/#ta-lib 下载对应的版本“TA_Lib‑0.4.19‑cp37‑cp37m‑win_amd64.whl”  然后 pip3 install TA_Lib‑0.4.19‑cp37‑cp37m‑win_amd64.whl'''
 
 
