@@ -16,7 +16,7 @@ if __name__ == '__main__':
     cerebro.broker.setcommission(commission=0.001)
     cerebro.addsizer(bt.sizers.FixedSize, stake=10)
     data = bt.feeds.YahooFinanceCSVData(
-        dataname='000890.csv',
+        dataname='algo/backtra/000890.csv',
         fromdate=datetime.datetime(2017, 1, 1),
         todate=datetime.datetime(2023, 12, 31),
         reverse=False)
