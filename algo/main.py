@@ -11,7 +11,8 @@ from fastapi import FastAPI
 from app.api.routers import daly_data, stock_strategy, users
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
-from app.api.routers.tasks import scheduler, my_task
+from app.api.routers.tasks import my_task, morning_analysis
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from contextlib import asynccontextmanager
 
@@ -21,18 +22,28 @@ logging.basicConfig(
     level=logging.NOTSET,
     filename='default.log'
 )
+scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时初始化调度器"""
     # 添加定时任务
+    scheduler.start()
+    print("调度器已启动")
+    # 添加定时任务
+    trigger = CronTrigger(
+        minute="*",  # 每分钟执行一次
+        day_of_week="0-4",  # 每个工作日（周一到周五）
+        hour="*",  # 每小时
+        timezone="Asia/Shanghai"  # 设置时区
+    )
+    # scheduler.add_job(my_task, trigger, id="my_task", replace_existing=True)
     scheduler.add_job(
-        my_task,
-        trigger=CronTrigger(day_of_week="mon-fri", hour=16, minute=30),
-        id="workday_task",
+        morning_analysis,
+        trigger=CronTrigger(day_of_week="0-6", hour="*", minute="*"),
+        id="morning_analysis",
         replace_existing=True
     )
-    scheduler.start()
     print("定时任务已启动")
     yield
     # Clean up the ML models and release the resources
@@ -40,8 +51,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
     print("定时任务已关闭")
 
-app = FastAPI(lifespan=lifespan)
-app = FastAPI(docs_url=None)  # 禁用默认的 /docs 路由
+app = FastAPI(docs_url=None,lifespan=lifespan)  # 禁用默认的 /docs 路由
 app.mount("/static", StaticFiles(directory="algo/static"), name="static")
 
 @app.get("/docs", include_in_schema=False)
@@ -67,17 +77,17 @@ app.add_middleware(
 app.include_router(users.router)
 app.include_router(daly_data.router)
 app.include_router(stock_strategy.router)
-host = os.getenv("HOST")
-port = int(os.getenv("PORT"))
 
-brain_thread_list = []
+# brain_thread_list = []
 
 # 定义要监控的股票列表
 # brain_thread_list.append(StockMonitorThread(stock_names=['嵘泰股份', '远程股份', '海鸥股份', '江海股份', '好想你', '三花智控', '三六零', '飞龙股份', '元隆雅图', '北特科技', '奥飞娱乐'], interval=3))
 
 # 启动所有线程
-for i in brain_thread_list:
-    i.start()
+# for i in brain_thread_list:
+    # i.start()
 
 # 注意：这里的"main:app"意味着uvicorn会从main.py文件中寻找名为app的FastAPI实例
+host = os.getenv("HOST")
+port = int(os.getenv("PORT"))
 uvicorn.run("main:app", host=host, port=port, log_level="info")            # 启动web服务器 fastapi

@@ -1,5 +1,4 @@
 # app/tasks.py
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 import easyquotation
 import os
@@ -8,11 +7,30 @@ import pywencai as wc
 import webbrowser
 import time
 
-scheduler = AsyncIOScheduler()
-
 def my_task():
     """定时任务函数"""
     print("定时任务执行了！当前时间：", datetime.now())
+
+def morning_analysis():
+    """定时任务函数"""
+    question_list = [
+        '剔除ST,准备拉升',
+        '主力资金流入,剔除ST,剔除次新,剔除北交所,形成拉升通道',
+        '量比大于5的个股,排除高开8%以上的个股,同时剔除涨幅为负或0的个股',
+        '委比为正、主力净买额为正,5日、10日均线向上发散',
+        '在9:25分点击现量排名，选择现量在一万手以上的个股',
+        '量比大于1.8且涨幅在0-2%之间的个股也值得关注',
+        '大盘走势和市场热点板块，优先选择板块内趋势向上的个股',
+        '选择流通盘较小（如小于200亿）且处于阶段性底部的个股',
+        '选择短期均线（如5日、10日、21日均线）多头排列的个股',
+        '关注KDJ低位金叉（40分界线以上）且周、月KDJ向上发散的个股',
+        '主力资金流入或热点板块，快速筛选',
+    ]
+
+    for i in question_list:
+        print(i)
+        question_wc(i)
+        time.sleep(10)
 
 
 
@@ -119,25 +137,25 @@ def question_wc(question):
 #             time.sleep(60)
 
 
-question_list = [
-    '剔除ST,准备拉升',
-    '主力资金流入,剔除ST,剔除次新,剔除北交所,形成拉升通道',
-    '量比大于5的个股,排除高开8%以上的个股,同时剔除涨幅为负或0的个股',
-    '委比为正、主力净买额为正,5日、10日均线向上发散',
-    '在9:25分点击现量排名，选择现量在一万手以上的个股',
-    '量比大于1.8且涨幅在0-2%之间的个股也值得关注',
-    '大盘走势和市场热点板块，优先选择板块内趋势向上的个股',
-    '选择流通盘较小（如小于200亿）且处于阶段性底部的个股',
-    '选择短期均线（如5日、10日、21日均线）多头排列的个股',
-    '关注KDJ低位金叉（40分界线以上）且周、月KDJ向上发散的个股',
-    '主力资金流入或热点板块，快速筛选',
-]
+# question_list = [
+#     '剔除ST,准备拉升',
+#     '主力资金流入,剔除ST,剔除次新,剔除北交所,形成拉升通道',
+#     '量比大于5的个股,排除高开8%以上的个股,同时剔除涨幅为负或0的个股',
+#     '委比为正、主力净买额为正,5日、10日均线向上发散',
+#     '在9:25分点击现量排名，选择现量在一万手以上的个股',
+#     '量比大于1.8且涨幅在0-2%之间的个股也值得关注',
+#     '大盘走势和市场热点板块，优先选择板块内趋势向上的个股',
+#     '选择流通盘较小（如小于200亿）且处于阶段性底部的个股',
+#     '选择短期均线（如5日、10日、21日均线）多头排列的个股',
+#     '关注KDJ低位金叉（40分界线以上）且周、月KDJ向上发散的个股',
+#     '主力资金流入或热点板块，快速筛选',
+# ]
 
-watch_list = []
-for i in question_list:
-    print(i)
-    question_wc(i)
-    time.sleep(10)
+# watch_list = []
+# for i in question_list:
+#     print(i)
+#     question_wc(i)
+#     time.sleep(10)
     # if res is not None:
     #     print_(res)
     #     watch_list = watch_list + res

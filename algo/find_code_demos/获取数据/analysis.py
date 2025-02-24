@@ -1,8 +1,6 @@
 
 import time
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 import easyquotation
 import tushare as ts
 import pywencai as pywc
@@ -104,23 +102,23 @@ def watch_stock_tick(stock_name: list[str], interval):
             ef['rolling_max'] = ef['涨跌百分比']
             ef['rolling_min'] = ef['涨跌百分比'].rolling(window=100, min_periods=1).min()
             if len(df_dict['tick'][stock_code])<=10:
-                ef['signal_sell'] = np.nan
-                ef['signal_buy'] = np.nan
+                ef['signal_sell'] = "00"
+                ef['signal_buy'] = "00"
                 df_dict['tick'][stock_code] = pd.concat([df_dict['tick'][stock_code], ef], ignore_index=True)
             else:
-                ef['signal_sell'] = 'sell' if df_dict['tick'][stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max() - ef['涨跌百分比'].iloc[-1] >= 1.5 else np.nan
-                ef['signal_buy'] = 'buy' if ef['涨跌百分比'].iloc[-1] - df_dict['tick'][stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min() >= 1.5 else np.nan
+                ef['signal_sell'] = 'sell' if df_dict['tick'][stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max() - ef['涨跌百分比'].iloc[-1] >= 1.5 else "00"
+                ef['signal_buy'] = 'buy' if ef['涨跌百分比'].iloc[-1] - df_dict['tick'][stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min() >= 1.5 else "00"
                 df_dict['tick'][stock_code] = pd.concat([df_dict['tick'][stock_code], ef], ignore_index=True)
             jgcjl = renamed_data["价格成交量成交额"][0].split("/")
             if cjbs != int(jgcjl[1]):
                 cjbs = int(jgcjl[1])
-            print(f'{ef["name"].iloc[-1]}:{ef["now"].iloc[-1]}||{ef["涨跌百分比"].iloc[-1]}-{ef["量比"].iloc[-1]}-{ef["均价"].iloc[-1]}' +
-                  f'-{df_dict['tick'][stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max()}' +
-                  f'\t{df_dict['tick'][stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min()}\t{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}' +
+            print(f'{ef["name"].iloc[-1]}:{ef["now"].iloc[-1]}\t||{ef["涨跌百分比"].iloc[-1]}-{ef["量比"].iloc[-1]}-{ef["均价"].iloc[-1]}' +
+                  f'-{df_dict['tick'][stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max()},' +
+                  f'{df_dict['tick'][stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min()}\t{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}' +
                   f'\t{df_dict["sh"][stock_code] if stock_code in df_dict["sh"] else 0}' +
-                  f'\t{"高" if ef["now"].iloc[-1] > ef["均价"].iloc[-1] else "低"}:' +
-                  f'\t{(ef["now"].iloc[-1] - ef["均价"].iloc[-1]):.2f}:' + 
-                  f'\t{(float((ef["now"].iloc[-1] - ef["均价"].iloc[-1])) / ef["now"].iloc[-1])*100:.2f}%')
+                  f'\t\t{"高" if ef["now"].iloc[-1] > ef["均价"].iloc[-1] else "低"}:' +
+                  f'{(ef["now"].iloc[-1] - ef["均价"].iloc[-1]):.2f}:' + 
+                  f'{(float((ef["now"].iloc[-1] - ef["均价"].iloc[-1])) / ef["now"].iloc[-1])*100:.2f}%')
         # print(df_dict)
         print('-'*100)
         time.sleep(interval)
