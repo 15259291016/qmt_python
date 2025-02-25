@@ -1,2 +1,0 @@
-ts_code,trade_date,close,open,high,low,pre_close,change,pct_change,vol,amount,adj_factor,open_hfq,open_qfq,close_hfq,close_qfq,high_hfq,high_qfq,low_hfq,low_qfq,pre_close_hfq,pre_close_qfq,macd_dif,macd_dea,macd,kdj_k,kdj_d,kdj_j,rsi_6,rsi_12,rsi_24,boll_upper,boll_mid,boll_lower,cci
-002120.SZ,20241106,8.37,8.43,8.54,8.32,8.42,-0.05,-0.5938,464109.4,390776.91,6.495,54.75285,8.43,54.36315,8.37,55.4673,8.54,54.0384,8.32,54.6879,8.42,0.13,0.182,-0.104,41.867,42.43,40.74,49.918,53.796,56.053,8.595,8.397,8.199,23.256

@@ -8,6 +8,6 @@ algo/app/default.log
 algo/app/data/png/*
 algo/app/data/csv/*
 algo/data/*
-__pycache__/
+**/__pycache__/
 files/
 */default.log

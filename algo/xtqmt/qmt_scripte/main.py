@@ -108,7 +108,7 @@ class MyXtQuantTraderCallback(XtQuantTraderCallback):
 # miniQMT安装路径
 path = r'H:\Program Files (x86)\国金证券QMT交易端\userdata_mini'
 # QMT账号
-account = '8881667160'
+account = 'xxx'
 # if __name__ == "__main__":
 
 

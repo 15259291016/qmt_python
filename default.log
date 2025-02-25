@@ -1,0 +1,32 @@
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71737.165246 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71737.164238 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71695.492046 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71695.492046 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71619.510854 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71619.509494 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71313.307975 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71313.307975 seconds)
