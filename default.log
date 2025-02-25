@@ -30,3 +30,120 @@ DEBUG:apscheduler.scheduler:Looking for jobs to run
 DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71313.307975 seconds)
 DEBUG:apscheduler.scheduler:Looking for jobs to run
 DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 71313.307975 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65288.169625 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65288.169625 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65231.768151 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65231.768151 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65157.467757 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65157.417609 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65113.611978 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65113.611978 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65040.918982 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 65040.918982 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64988.342129 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64988.342129 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64927.547741 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64927.547741 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64563.188436 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64563.187439 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64542.009016 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64542.009016 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64317.241449 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64317.241125 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64297.120223 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64297.119897 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64138.835395 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 64138.835083 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 63840.607909 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 63840.607596 seconds)
+DEBUG:tzlocal:Looking up time zone info from registry
+DEBUG:asyncio:Using proactor: IocpProactor
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 63816.277229 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 63816.276711 seconds)

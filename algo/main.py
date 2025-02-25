@@ -18,6 +18,8 @@ from contextlib import asynccontextmanager
 from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton
 import sys
 import threading
+from utils import synchronous_dependency
+
 nest_asyncio.apply()
 load_dotenv()
 logging.basicConfig(
@@ -95,6 +97,7 @@ def start_fastapi():
     uvicorn.run("main:app", host=host, port=port, log_level="info")            # 启动web服务器 fastapi
 
 if __name__ == "__main__":
+    synchronous_dependency.update_requirements()
     fastapi_thread = threading.Thread(target=start_fastapi)
     fastapi_thread.daemon = True  # 设置为守护线程
     fastapi_thread.start()
