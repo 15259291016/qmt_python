@@ -11,11 +11,13 @@ from fastapi import FastAPI
 from app.api.routers import daly_data, stock_strategy, users
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.staticfiles import StaticFiles
-from app.api.routers.tasks import my_task, morning_analysis
+from app.api.routers.tasks import morning_analysis
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from contextlib import asynccontextmanager
-
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton
+import sys
+import threading
 nest_asyncio.apply()
 load_dotenv()
 logging.basicConfig(
@@ -37,16 +39,14 @@ async def lifespan(app: FastAPI):
         hour="*",  # 每小时
         timezone="Asia/Shanghai"  # 设置时区
     )
-    # scheduler.add_job(my_task, trigger, id="my_task", replace_existing=True)
     scheduler.add_job(
         morning_analysis,
-        trigger=CronTrigger(day_of_week="0-6", hour="*", minute="*"),
+        trigger=CronTrigger(day_of_week="0-6", hour=16,minute=45),
         id="morning_analysis",
         replace_existing=True
     )
     print("定时任务已启动")
     yield
-    # Clean up the ML models and release the resources
     """关闭时停止调度器"""
     scheduler.shutdown()
     print("定时任务已关闭")
@@ -78,16 +78,27 @@ app.include_router(users.router)
 app.include_router(daly_data.router)
 app.include_router(stock_strategy.router)
 
-# brain_thread_list = []
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('QT界面')
+        
+        button = QPushButton('登录', self)
+        button.clicked.connect(self.on_button_clicked)
 
-# 定义要监控的股票列表
-# brain_thread_list.append(StockMonitorThread(stock_names=['嵘泰股份', '远程股份', '海鸥股份', '江海股份', '好想你', '三花智控', '三六零', '飞龙股份', '元隆雅图', '北特科技', '奥飞娱乐'], interval=3))
+    def on_button_clicked(self):
+        print('按钮被点击!')
 
-# 启动所有线程
-# for i in brain_thread_list:
-    # i.start()
+def start_fastapi():
+    host = os.getenv("HOST")
+    port = int(os.getenv("PORT"))
+    uvicorn.run("main:app", host=host, port=port, log_level="info")            # 启动web服务器 fastapi
 
-# 注意：这里的"main:app"意味着uvicorn会从main.py文件中寻找名为app的FastAPI实例
-host = os.getenv("HOST")
-port = int(os.getenv("PORT"))
-uvicorn.run("main:app", host=host, port=port, log_level="info")            # 启动web服务器 fastapi
+if __name__ == "__main__":
+    fastapi_thread = threading.Thread(target=start_fastapi)
+    fastapi_thread.daemon = True  # 设置为守护线程
+    fastapi_thread.start()
+    app = QApplication([])
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
