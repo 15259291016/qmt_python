@@ -147,3 +147,29 @@ DEBUG:apscheduler.scheduler:Looking for jobs to run
 DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 63816.277229 seconds)
 DEBUG:apscheduler.scheduler:Looking for jobs to run
 DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 63816.276711 seconds)
+DEBUG:tzlocal:/etc/timezone found, contents:
+ Asia/Shanghai
+DEBUG:tzlocal:/etc/localtime found
+DEBUG:tzlocal:2 found:
+ {'/etc/timezone': 'Asia/Shanghai', '/etc/localtime is a symlink to': 'Asia/Shanghai'}
+WARNING:tzlocal:/etc/timezone is deprecated on Debian, and no longer reliable. Ignoring.
+DEBUG:asyncio:Using selector: EpollSelector
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 4729.056956 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 4729.055393 seconds)
+DEBUG:tzlocal:/etc/timezone found, contents:
+ Asia/Shanghai
+DEBUG:tzlocal:/etc/localtime found
+DEBUG:tzlocal:2 found:
+ {'/etc/timezone': 'Asia/Shanghai', '/etc/localtime is a symlink to': 'Asia/Shanghai'}
+WARNING:tzlocal:/etc/timezone is deprecated on Debian, and no longer reliable. Ignoring.
+DEBUG:asyncio:Using selector: EpollSelector
+INFO:apscheduler.scheduler:Scheduler started
+INFO:apscheduler.scheduler:Added job "morning_analysis" to job store "default"
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 4710.485240 seconds)
+DEBUG:apscheduler.scheduler:Looking for jobs to run
+DEBUG:apscheduler.scheduler:Next wakeup is due at 2025-02-26 16:45:00+08:00 (in 4710.483921 seconds)

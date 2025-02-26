@@ -99,9 +99,9 @@ def start_fastapi():
 if __name__ == "__main__":
     synchronous_dependency.update_requirements()
     fastapi_thread = threading.Thread(target=start_fastapi)
-    fastapi_thread.daemon = True  # 设置为守护线程
+    # fastapi_thread.daemon = True  # 设置为守护线程
     fastapi_thread.start()
-    app = QApplication([])
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec_())
+    # app = QApplication([])
+    # window = MainWindow()
+    # window.show()
+    # sys.exit(app.exec_())

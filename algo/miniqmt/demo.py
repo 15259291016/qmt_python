@@ -7,7 +7,7 @@ from xtquant import xtconstant
 # miniQMT安装路径
 mini_qmt_path = r'H:\Program Files (x86)\国金证券QMT交易端\userdata_mini'
 # QMT账号
-account = 'xxx'
+account = '8881667160'
 # 创建session_id
 session_id = int(random.randint(100000, 999999))
 # 创建交易对象

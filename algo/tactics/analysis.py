@@ -16,6 +16,7 @@ def stock_names_to_list(stock_names:list[str]):
     return result
 def is_trade_time():
     now = time.localtime()
+    # return True
     if (now.tm_hour == 9 and now.tm_min >= 24) or (now.tm_hour == 10) or (now.tm_hour == 11 and now.tm_min <= 30) or (now.tm_hour == 13) or (now.tm_hour == 14) or (now.tm_hour == 15 and now.tm_min == 0):
         return True
     return False
@@ -47,7 +48,6 @@ def watch_stock_tick(stock_name: list[str], interval):
         'tick':{},
         "sh":{},
     }
-    df = None
     cjbs = 0
     sh_thread = None
     def watch_sh_by_stocks_names(stock_names: list[str], interval, df_dict):
