@@ -5,9 +5,15 @@ import easyquotation
 import pywencai as pywc
 import threading
 
-from stock_names_to_list import stock_names_to_list
-
+csv_file_path = './data/股票列表.csv'    # 替换为您的CSV文件路径
+df = pd.read_csv(csv_file_path)
 quotation = easyquotation.use('tencent')  # 新浪 ['sina'] 腾讯 ['tencent', 'qq']
+
+def stock_names_to_list(stock_names:list[str]):
+    result = []
+    for name in stock_names:
+        result.append(df['ts_code'][df['name'] == name].tolist()[0].split(".")[0])
+    return result
 def is_trade_time():
     now = time.localtime()
     if (now.tm_hour == 9 and now.tm_min >= 24) or (now.tm_hour == 10) or (now.tm_hour == 11 and now.tm_min <= 30) or (now.tm_hour == 13) or (now.tm_hour == 14) or (now.tm_hour == 15 and now.tm_min == 0):
