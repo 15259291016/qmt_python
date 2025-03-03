@@ -115,13 +115,12 @@ def watch_stock_tick(stock_name: list[str], interval):
             if cjbs != int(jgcjl[1]):
                 cjbs = int(jgcjl[1])
             print(f'{ef["name"].iloc[-1]}:{ef["now"].iloc[-1]}\t||{ef["涨跌百分比"].iloc[-1]}-{ef["量比"].iloc[-1]}-{ef["均价"].iloc[-1]}' +
-                  f'-{df_dict['tick'][stock_code]['rolling_max'].rolling(window=100, min_periods=1).max().max()},' +
-                  f'{df_dict['tick'][stock_code]['rolling_min'].rolling(window=100, min_periods=1).min().min()}\t{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}' +
+                  f'-{df_dict["tick"][stock_code]["rolling_max"].rolling(window=100, min_periods=1).max().max()},' +
+                  f'{df_dict["tick"][stock_code]["rolling_min"].rolling(window=100, min_periods=1).min().min()}\t{ef["signal_sell"].iloc[-1]}-{ef["signal_buy"].iloc[-1]}, {int(jgcjl[1]) - cjbs}' +
                   f'\t{df_dict["sh"][stock_code] if stock_code in df_dict["sh"] else 0}' +
                   f'\t\t{"高" if ef["now"].iloc[-1] > ef["均价"].iloc[-1] else "低"}:' +
                   f'{(ef["now"].iloc[-1] - ef["均价"].iloc[-1]):.2f}:' + 
                   f'{(float((ef["now"].iloc[-1] - ef["均价"].iloc[-1])) / ef["now"].iloc[-1])*100:.2f}%')
-        # print(df_dict)
         print('-'*100)
         time.sleep(interval)
 # 中国核电、国机精工、电光科技、小方制药、中际旭创
