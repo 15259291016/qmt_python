@@ -34,18 +34,21 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     print("调度器已启动")
     # 添加定时任务
-    trigger = CronTrigger(
-        minute="*",  # 每分钟执行一次
-        day_of_week="0-4",  # 每个工作日（周一到周五）
-        hour="*",  # 每小时
-        timezone="Asia/Shanghai"  # 设置时区
-    )
     scheduler.add_job(
         morning_analysis,
-        trigger=CronTrigger(day_of_week="0-6", hour=16,minute=45),
+        trigger=CronTrigger(day_of_week="0-4", hour=9,minute=26),
         id="morning_analysis",
         replace_existing=True
     )
+    # morning_analysis()
+    
+    # scheduler.add_job(
+    #     morning_analysis,
+    #     morning_analysis,
+    #     trigger=CronTrigger(day_of_week="0-4",minute="*",timezone="Asia/Shanghai"),
+    #     id="morning_analysis",
+    #     replace_existing=True
+    # )
     print("定时任务已启动")
     yield
     """关闭时停止调度器"""
@@ -78,17 +81,6 @@ app.add_middleware(
 app.include_router(users.router)
 app.include_router(daly_data.router)
 app.include_router(stock_strategy.router)
-
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle('QT界面')
-        
-        button = QPushButton('登录', self)
-        button.clicked.connect(self.on_button_clicked)
-
-    def on_button_clicked(self):
-        print('按钮被点击!')
 
 def start_fastapi():
     host = os.getenv("HOST")

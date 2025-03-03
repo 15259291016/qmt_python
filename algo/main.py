@@ -14,6 +14,7 @@ import threading
 import pywencai as pywc
 from utils import synchronous_dependency
 from fastapiapp import start_fastapi
+import os
 
 configData = Cs.returnConfigData()
 quotation = easyquotation.use('tencent')  # 新浪 ['sina'] 腾讯 ['tencent', 'qq']
@@ -28,6 +29,14 @@ def stock_names_to_list(stock_names:list[str]):
     result = []
     for name in stock_names:
         result.append(df['ts_code'][df['name'] == name].tolist()[0].split(".")[0])
+    return result
+
+def stock_codes_to_list(codes_names:list[str]):
+    csv_file_path = './data/股票列表.csv'    # 替换为您的CSV文件路径
+    df = pd.read_csv(csv_file_path)
+    result = []
+    for code in codes_names:
+        result.append(df['ts_code'][df['symbol'] == int(code)].tolist()[0])
     return result
 
 class MyXtQuantTraderCallback(XtQuantTraderCallback):
@@ -188,6 +197,24 @@ if sh_thread is None:
     sh_thread.start()  
     
 def on_tick(data):
+    print(data)
+    # 查询账户资产信息
+    # asset = xt_trader.query_stock_asset(acc)
+    # if asset:
+    #     print(f"可用金额: {asset.cash}")
+    #     print(f"冻结金额: {asset.frozen_cash}")
+    #     print(f"总资产: {asset.total_asset}")
+    # else:
+    #     print("无法获取账户资产信息")
+
+    # # 查询持仓信息
+    # positions = xt_trader.query_stock_positions(acc)
+    # if positions:
+    #     print("持仓股票列表：")
+    #     for position in positions:
+    #         code_list.append(position.stock_code)
+    # else:
+    #     print("当前没有持仓股票")
     stock_code_list = []
     # 查询账户资产信息
     # print(data)
@@ -280,7 +307,6 @@ def on_tick(data):
                 print(stock,'符合打板条件')
                 stock_count = buy_values / lastprice
                 # 取整到最接近的 100 的倍数
-                a = 1/0
                 buy_volume = round(stock_count / 100) * 100
                 print(stock,'买入数量',buy_volume)
         
@@ -289,7 +315,12 @@ def on_tick(data):
 
 if __name__ == "__main__":
     xtdata.enable_hello = False
-    code_list = []
+    now = datetime.now()
+    day = now.strftime("%Y-%m-%d")
+    if os.path.exists(f'./data/{day}'):
+        directory = f'./data/{day}'
+        files = [f for f in os.listdir(directory) if os.path.isfile(os.path.join(directory, f))]
+    code_list = stock_codes_to_list(code_list)
     acc = StockAccount(account, 'STOCK')
     session_id = int(time.time())
     xt_trader = XtQuantTrader(path, session_id)
@@ -301,23 +332,6 @@ if __name__ == "__main__":
     print('建立交易连接，返回0表示连接成功', connect_result)
     # 对交易回调进行订阅，订阅后可以收到交易主推，返回0表示订阅成功
     subscribe_result = xt_trader.subscribe(acc)
-    # 查询账户资产信息
-    asset = xt_trader.query_stock_asset(acc)
-    if asset:
-        print(f"可用金额: {asset.cash}")
-        print(f"冻结金额: {asset.frozen_cash}")
-        print(f"总资产: {asset.total_asset}")
-    else:
-        print("无法获取账户资产信息")
-
-    # 查询持仓信息
-    positions = xt_trader.query_stock_positions(acc)
-    if positions:
-        print("持仓股票列表：")
-        for position in positions:
-            code_list.append(position.stock_code)
-    else:
-        print("当前没有持仓股票")
     xtdata.subscribe_whole_quote(code_list, callback=on_tick)
     synchronous_dependency.update_requirements()
     fastapi_thread = threading.Thread(target=start_fastapi)
