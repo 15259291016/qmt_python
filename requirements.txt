@@ -1,7 +1,6 @@
 aiohappyeyeballs==2.6.1
 aiohttp==3.12.13
 aiosignal==1.4.0
-akracer==0.0.13
 akshare==1.17.18
 annotated-types==0.7.0
 APScheduler==3.11.0
@@ -24,7 +23,6 @@ idna==3.10
 jsonpath==0.82.2
 kiwisolver==1.4.8
 lazy-model==0.2.0
-line_profiler==4.2.0
 loguru==0.7.3
 lxml==6.0.0
 markdown-it-py==3.0.0
@@ -55,7 +53,7 @@ seaborn==0.13.2
 six==1.17.0
 soupsieve==2.7
 tabulate==0.9.0
-tornado @ file:///croot/tornado_1748956929273/work
+tornado==6.5.1
 tqdm==4.67.1
 typing-inspection==0.4.1
 typing_extensions==4.14.1
