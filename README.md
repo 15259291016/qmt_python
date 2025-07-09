@@ -12,7 +12,7 @@ conda activate py311
 ## 安装依赖
 
 ```bash
-pip install -r requirements250224.txt
+pip install -r requirements.txt
 ```
 
 ## 环境配置
