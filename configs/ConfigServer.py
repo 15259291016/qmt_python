@@ -40,6 +40,6 @@ def get_log_config():
     :return: 日志配置字典
     """
     return {
-        "log_file": os.getenv("LOG_FILE", "logs/aigc.log"),
+        "log_file": os.getenv("LOG_FILE", "logs/app.log"),
         "log_size_limit": int(os.getenv("LOG_SIZE_LIMIT", "1048576"))
     }

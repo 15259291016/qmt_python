@@ -51,7 +51,7 @@ def get_logger(name, level, log_path, max_bytes=1024 * 1024 * 10, backup_count=1
     logger_.handlers = []
     logger_.setLevel(level)
 
-    rich_handler = RichHandler(console=console, rich_tracebacks=True, tracebacks_show_locals=DEBUG)
+    rich_handler = RichHandler(console=console, rich_tracebacks=True, tracebacks_show_locals=DEBUG.is_debug)
     rich_handler.setLevel(logging.DEBUG)
 
     file_handler = RotatingFileHandler(log_path, maxBytes=max_bytes, backupCount=backup_count)
@@ -93,27 +93,25 @@ def callback(future, level, msg, *args, cnt, **kwargs):
 
 
 class Logger(object):
-    def __init__(self, config_path):
+    def __init__(self):
         self.thread_pool = ThreadPoolExecutor()
-        self.config = yaml.load(open(config_path, "r").read(), yaml.FullLoader)
-        # self.report = self.config["report"]
+        # 直接从环境变量读取配置
+        self.config = {
+            "log_file": os.getenv("LOG_FILE", "logs/app.log"),
+            "level": os.getenv("LOG_LEVEL", "INFO"),
+            "log_size_limit": int(os.getenv("LOG_SIZE_LIMIT", 1048576)),
+        }
         if not os.path.exists(os.path.dirname(self.config["log_file"])):
             os.makedirs(os.path.dirname(self.config["log_file"]))
 
         level = self.config.get("level")
-        # self.logger = get_logger("aigc", level, self.config["log_file"])
-        self.logger = get_logger("test", level, self.config["log_file"])
+        self.logger = get_logger("app", level, self.config["log_file"])
 
         self.console = console
         self._debug = os.getenv("DEBUG", "false").lower() == "true"
-
-        # self.IP = socket.gethostbyname(socket.gethostname())
-        # self.FLAG = self.config["flag"] or ""
-        # self.TOPIC = self.config["zhiyan_topic"] or ""
         self.IP = ""
         self.FLAG = ""
         self.TOPIC = ""
-        # self.NOTIFY_WEBHOOK = self.config["notify_webhook"]
 
     def info(self, msg, *args, **kwargs):
         self._log(LogLevel.INFO, msg, *args, **kwargs)
@@ -251,9 +249,9 @@ class Logger(object):
 
 
 if (env_name := os.getenv("DEPLOY_ENV", "").lower()) == "dev_local":
-    logger = Logger(f"configs/{env_name}/log.yaml")
+    logger = Logger()
 else:
-    logger = Logger("configs/log.yaml")
+    logger = Logger()
 
 
 if __name__ == "__main__":
