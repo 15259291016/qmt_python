@@ -55,6 +55,10 @@ class LoginHandler(RequestHandler):
         if not user or not AuthUtils.verify_password(data["password"], user.password_hash):
             return {"code": 401, "msg": "用户名或密码错误", "data": {}}
         
+        # 订阅到期校验
+        if not user.subscription_expire_at or user.subscription_expire_at < datetime.utcnow():
+            return {"code": 403, "msg": "订阅已到期，请续费", "data": {}}
+        
         # 创建token对
         token_pair = AuthUtils.create_token_pair(str(user.id), user.username, user.is_admin)
         

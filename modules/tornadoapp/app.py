@@ -29,6 +29,7 @@ from modules.tornadoapp.handler.business_handler import (
     RoleBasedHandler,
     MixedPermissionHandler
 )
+from modules.tornadoapp.handler.subscribe_handler import SubscribeHandler
 from modules.tornadoapp.middleware.middleware_manager import create_app_with_middlewares
 
 
@@ -43,6 +44,7 @@ routes = [
     (r"/api/auth/refresh", RefreshTokenHandler),
     (r"/api/auth/logout", LogoutHandler),
     (r"/api/auth/profile", ProfileHandler),
+    (r"/api/user/subscribe", SubscribeHandler),
     
     # 权限管理相关路由
     (r"/api/roles", RoleHandler),
