@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 from modules.tornadoapp.model import demomodel
 from modules.tornadoapp.model.user_model import User, UserSession
+from modules.tornadoapp.model.permission_model import Role, Permission, UserRole, PermissionGroup
 
 # 加载环境变量
 load_dotenv()
@@ -52,7 +53,11 @@ async def init_beanie():
         document_models=[
             demomodel.DemoModel,
             User,
-            UserSession
+            UserSession,
+            Role,
+            Permission,
+            UserRole,
+            PermissionGroup
         ]
     )
 
