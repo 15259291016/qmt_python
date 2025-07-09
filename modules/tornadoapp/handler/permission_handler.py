@@ -215,7 +215,7 @@ class PermissionHandler(RequestHandler, PermissionMixin):
             
             return {
                 "code": 200,
-                "msg": "Permissions retrieved successfully",
+                "msg": "获取权限列表成功",
                 "data": {
                     "permissions": permission_list,
                     "pagination": {
@@ -235,12 +235,12 @@ class PermissionHandler(RequestHandler, PermissionMixin):
         
         # 验证必填字段
         if not data.get("name") or not data.get("resource") or not data.get("action"):
-            return {"code": 400, "msg": "Permission name, resource and action are required", "data": {}}
+            return {"code": 400, "msg": "权限名称、资源和操作为必填项", "data": {}}
         
         # 检查权限名是否已存在
         existing_permission = await Permission.find_one({"name": data["name"]})
         if existing_permission:
-            return {"code": 400, "msg": "Permission name already exists", "data": {}}
+            return {"code": 400, "msg": "权限名称已存在", "data": {}}
         
         # 创建权限
         permission = Permission(
@@ -254,7 +254,7 @@ class PermissionHandler(RequestHandler, PermissionMixin):
         
         return {
             "code": 201,
-            "msg": "Permission created successfully",
+            "msg": "权限创建成功",
             "data": {"permission_id": str(permission.id)}
         }
 
@@ -280,7 +280,7 @@ class UserRoleHandler(RequestHandler, PermissionMixin):
         
         return {
             "code": 200,
-            "msg": "User roles retrieved successfully",
+            "msg": "获取用户角色成功",
             "data": {"roles": role_list}
         }
     
@@ -291,7 +291,7 @@ class UserRoleHandler(RequestHandler, PermissionMixin):
         data = json.loads(self.request.body)
         
         if not data.get("role_id"):
-            return {"code": 400, "msg": "Role ID is required", "data": {}}
+            return {"code": 400, "msg": "角色ID为必填项", "data": {}}
         
         current_user_id = await self.get_current_user_id()
         expires_at = None
@@ -309,11 +309,11 @@ class UserRoleHandler(RequestHandler, PermissionMixin):
         if success:
             return {
                 "code": 200,
-                "msg": "Role assigned successfully",
+                "msg": "角色分配成功",
                 "data": {}
             }
         else:
-            return {"code": 400, "msg": "Failed to assign role", "data": {}}
+            return {"code": 400, "msg": "分配角色失败", "data": {}}
     
     @try_except_async_request
     @require_permission("user:write")
@@ -324,11 +324,11 @@ class UserRoleHandler(RequestHandler, PermissionMixin):
         if success:
             return {
                 "code": 200,
-                "msg": "Role removed successfully",
+                "msg": "角色移除成功",
                 "data": {}
             }
         else:
-            return {"code": 400, "msg": "Failed to remove role", "data": {}}
+            return {"code": 400, "msg": "移除角色失败", "data": {}}
 
 
 class UserPermissionHandler(RequestHandler, PermissionMixin):
@@ -342,16 +342,16 @@ class UserPermissionHandler(RequestHandler, PermissionMixin):
             # 获取指定用户的权限
             summary = await PermissionUtils.get_user_permission_summary(user_id)
             if not summary:
-                return {"code": 404, "msg": "User not found", "data": {}}
+                return {"code": 404, "msg": "用户不存在", "data": {}}
         else:
             # 获取当前用户的权限
             summary = await self.get_user_permission_summary()
             if not summary:
-                return {"code": 401, "msg": "Authentication required", "data": {}}
+                return {"code": 401, "msg": "未认证，请先登录", "data": {}}
         
         return {
             "code": 200,
-            "msg": "User permissions retrieved successfully",
+            "msg": "获取用户权限成功",
             "data": summary
         }
     
@@ -362,7 +362,7 @@ class UserPermissionHandler(RequestHandler, PermissionMixin):
         data = json.loads(self.request.body)
         
         if not data.get("permissions"):
-            return {"code": 400, "msg": "Permissions list is required", "data": {}}
+            return {"code": 400, "msg": "权限列表为必填项", "data": {}}
         
         permissions = data["permissions"]
         if isinstance(permissions, str):
@@ -372,6 +372,6 @@ class UserPermissionHandler(RequestHandler, PermissionMixin):
         
         return {
             "code": 200,
-            "msg": "Permission check completed",
+            "msg": "权限检查完成",
             "data": {"permissions": result}
         } 
