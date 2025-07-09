@@ -10,7 +10,16 @@ def auth_middleware(handler_class):
     class AuthMiddlewareHandler(handler_class):
         async def prepare(self):
             """在每个请求处理前调用"""
-            await super().prepare()
+            # 安全地调用父类的prepare方法
+            try:
+                parent_prepare = super().prepare
+                if parent_prepare is not None:
+                    result = parent_prepare()
+                    if hasattr(result, '__await__'):
+                        await result
+            except AttributeError:
+                # 父类没有prepare方法，忽略
+                pass
             
             # 跳过不需要认证的路径
             if self._should_skip_auth():
