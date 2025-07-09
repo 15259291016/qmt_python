@@ -1,0 +1,2 @@
+log_file: logs/aigc.log
+log_size_limit: 1048576

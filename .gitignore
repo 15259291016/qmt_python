@@ -1,0 +1,15 @@
+.idea/
+data/*
+!data/股票列表.csv
+algo/app/files/*
+!algo/app/files/
+algo/app/stock/*
+!algo/app/stock/
+algo/app/default.log
+algo/app/data/png/*
+algo/app/data/csv/*
+algo/data/*
+__pycache__/
+files/
+*/default.log
+logs
