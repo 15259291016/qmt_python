@@ -25,12 +25,13 @@ from modules.tornadoapp.utils.format import CustomJSONEncoder
 from modules.tornadoapp.utils.logger import logger
 from modules.tornadoapp.utils.time_relative import get_utc8_datetime
 
-log_config = configs["log_config"]
+log_config = configs.get("log_config", {})
 is_local = "local" in os.environ.get("DEPLOY_ENV", "")
 rich_log = logging.getLogger("rich")
 rich_log.setLevel("DEBUG")
 
-if show_rich_log := log_config.get("show_rich_log", True):
+show_rich_log = log_config.get("show_rich_log", True)
+if show_rich_log:
     rich_log.addHandler(
         RichHandler(console=Console(width=None if is_local else 150), rich_tracebacks=True, tracebacks_show_locals=True)
     )
@@ -74,7 +75,7 @@ def upload_use_record(func=None, type1=None, type2=None, statistic_type=1):
                     func_type = type1
             elif statistic_type == StatisticEnum.LLM_EVALUATION.value:
                 task_type = request_data.get("task_type")
-                if int(task_type) == 1:
+                if task_type and int(task_type) == 1:
                     func_type = type1
                 else:
                     func_type = type2
