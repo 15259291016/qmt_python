@@ -14,12 +14,12 @@ def require_permission(permission: str):
             # 获取当前用户ID
             user_id = await get_current_user_id(self)
             if not user_id:
-                return {"code": 401, "msg": "Authentication required", "data": {}}
+                return {"code": 401, "msg": "未认证，请先登录", "data": {}}
             
             # 检查权限
             has_permission = await PermissionUtils.check_permission(user_id, permission)
             if not has_permission:
-                return {"code": 403, "msg": f"Permission denied: {permission}", "data": {}}
+                return {"code": 403, "msg": f"权限拒绝: {permission}", "data": {}}
             
             return await func(self, *args, **kwargs)
         return wrapper
@@ -34,17 +34,17 @@ def require_permissions(permissions: List[str], require_all: bool = True):
             # 获取当前用户ID
             user_id = await get_current_user_id(self)
             if not user_id:
-                return {"code": 401, "msg": "Authentication required", "data": {}}
+                return {"code": 401, "msg": "未认证，请先登录", "data": {}}
             
             # 检查权限
             if require_all:
                 has_permissions = await PermissionUtils.has_all_permissions(user_id, permissions)
                 if not has_permissions:
-                    return {"code": 403, "msg": f"Permission denied: requires all of {permissions}", "data": {}}
+                    return {"code": 403, "msg": f"权限拒绝: 需要全部权限 {permissions}", "data": {}}
             else:
                 has_permissions = await PermissionUtils.has_any_permission(user_id, permissions)
                 if not has_permissions:
-                    return {"code": 403, "msg": f"Permission denied: requires any of {permissions}", "data": {}}
+                    return {"code": 403, "msg": f"权限拒绝: 需要任意权限 {permissions}", "data": {}}
             
             return await func(self, *args, **kwargs)
         return wrapper
@@ -59,12 +59,12 @@ def require_admin():
             # 获取当前用户ID
             user_id = await get_current_user_id(self)
             if not user_id:
-                return {"code": 401, "msg": "Authentication required", "data": {}}
+                return {"code": 401, "msg": "未认证，请先登录", "data": {}}
             
             # 检查管理员权限
             is_admin = await PermissionUtils.is_admin(user_id)
             if not is_admin:
-                return {"code": 403, "msg": "Admin permission required", "data": {}}
+                return {"code": 403, "msg": "需要管理员权限", "data": {}}
             
             return await func(self, *args, **kwargs)
         return wrapper
@@ -79,14 +79,14 @@ def require_role(role_name: str):
             # 获取当前用户ID
             user_id = await get_current_user_id(self)
             if not user_id:
-                return {"code": 401, "msg": "Authentication required", "data": {}}
+                return {"code": 401, "msg": "未认证，请先登录", "data": {}}
             
             # 获取用户角色
             roles = await PermissionUtils.get_user_roles(user_id)
             role_names = [role.name for role in roles]
             
             if role_name not in role_names:
-                return {"code": 403, "msg": f"Role required: {role_name}", "data": {}}
+                return {"code": 403, "msg": f"需要角色: {role_name}", "data": {}}
             
             return await func(self, *args, **kwargs)
         return wrapper
@@ -101,7 +101,7 @@ def require_roles(role_names: List[str], require_all: bool = True):
             # 获取当前用户ID
             user_id = await get_current_user_id(self)
             if not user_id:
-                return {"code": 401, "msg": "Authentication required", "data": {}}
+                return {"code": 401, "msg": "未认证，请先登录", "data": {}}
             
             # 获取用户角色
             roles = await PermissionUtils.get_user_roles(user_id)
@@ -111,11 +111,11 @@ def require_roles(role_names: List[str], require_all: bool = True):
             if require_all:
                 has_roles = all(role_name in user_role_names for role_name in role_names)
                 if not has_roles:
-                    return {"code": 403, "msg": f"Roles required: all of {role_names}", "data": {}}
+                    return {"code": 403, "msg": f"需要角色: 全部 {role_names}", "data": {}}
             else:
                 has_roles = any(role_name in user_role_names for role_name in role_names)
                 if not has_roles:
-                    return {"code": 403, "msg": f"Roles required: any of {role_names}", "data": {}}
+                    return {"code": 403, "msg": f"需要角色: 任意 {role_names}", "data": {}}
             
             return await func(self, *args, **kwargs)
         return wrapper

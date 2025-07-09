@@ -16,12 +16,12 @@ class RegisterHandler(RequestHandler):
         
         # 验证必填字段
         if not data.get("username") or not data.get("email") or not data.get("password"):
-            return {"code": 400, "msg": "Username, email and password are required", "data": {}}
+            return {"code": 400, "msg": "用户名、邮箱和密码为必填项", "data": {}}
         
         # 检查用户名是否已存在
         existing_user = await User.find_one({"username": data["username"]})
         if existing_user:
-            return {"code": 400, "msg": "Username already exists", "data": {}}
+            return {"code": 400, "msg": "用户名已存在", "data": {}}
         
         # 创建用户
         user = User(
@@ -35,7 +35,7 @@ class RegisterHandler(RequestHandler):
         
         return {
             "code": 201,
-            "msg": "User registered successfully",
+            "msg": "用户注册成功",
             "data": {"user_id": str(user.id)}
         }
 
@@ -48,12 +48,12 @@ class LoginHandler(RequestHandler):
         data = json.loads(self.request.body)
         
         if not data.get("username") or not data.get("password"):
-            return {"code": 400, "msg": "Username and password are required", "data": {}}
+            return {"code": 400, "msg": "用户名和密码为必填项", "data": {}}
         
         # 查找用户
         user = await User.find_one({"username": data["username"]})
         if not user or not AuthUtils.verify_password(data["password"], user.password_hash):
-            return {"code": 401, "msg": "Invalid username or password", "data": {}}
+            return {"code": 401, "msg": "用户名或密码错误", "data": {}}
         
         # 创建token对
         token_pair = AuthUtils.create_token_pair(str(user.id), user.username, user.is_admin)
@@ -64,7 +64,7 @@ class LoginHandler(RequestHandler):
         
         return {
             "code": 200,
-            "msg": "Login successful",
+            "msg": "登录成功",
             "data": {
                 "user": {
                     "id": str(user.id),
@@ -85,24 +85,24 @@ class RefreshTokenHandler(RequestHandler):
         data = json.loads(self.request.body)
         
         if not data.get("refresh_token"):
-            return {"code": 400, "msg": "Refresh token is required", "data": {}}
+            return {"code": 400, "msg": "刷新令牌为必填项", "data": {}}
         
         # 验证刷新token
         payload = AuthUtils.verify_token(data["refresh_token"])
         if not payload or payload.get("type") != "refresh":
-            return {"code": 401, "msg": "Invalid refresh token", "data": {}}
+            return {"code": 401, "msg": "刷新令牌无效", "data": {}}
         
         # 查找用户
         user = await User.get(payload.get("sub"))
         if not user or not user.is_active:
-            return {"code": 401, "msg": "User not found or inactive", "data": {}}
+            return {"code": 401, "msg": "用户不存在或已禁用", "data": {}}
         
         # 创建新的token对
         new_token_pair = AuthUtils.create_token_pair(str(user.id), user.username, user.is_admin)
         
         return {
             "code": 200,
-            "msg": "Token refreshed successfully",
+            "msg": "令牌刷新成功",
             "data": {"tokens": new_token_pair}
         }
 
@@ -114,7 +114,7 @@ class LogoutHandler(RequestHandler):
     async def post(self):
         auth_header = self.request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return {"code": 400, "msg": "Authorization header required", "data": {}}
+            return {"code": 400, "msg": "缺少Authorization头", "data": {}}
         
         token = auth_header.split(" ")[1]
         
@@ -130,7 +130,7 @@ class LogoutHandler(RequestHandler):
         
         return {
             "code": 200,
-            "msg": "Logout successful",
+            "msg": "退出登录成功",
             "data": {}
         }
 
@@ -143,7 +143,7 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         # 需要认证
         auth_header = self.request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return {"code": 401, "msg": "Authentication required", "data": {}}
+            return {"code": 401, "msg": "未认证，请先登录", "data": {}}
         
         token = auth_header.split(" ")[1]
         
@@ -153,11 +153,11 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         # 获取用户信息
         user_info = self.get_auth_user(token)
         if not user_info:
-            return {"code": 401, "msg": "Invalid token", "data": {}}
+            return {"code": 401, "msg": "令牌无效", "data": {}}
         
         user = await User.get(user_info.get("sub"))
         if not user:
-            return {"code": 404, "msg": "User not found", "data": {}}
+            return {"code": 404, "msg": "用户不存在", "data": {}}
         
         response_data = {
             "id": str(user.id),
@@ -176,7 +176,7 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         
         return {
             "code": 200,
-            "msg": "Profile retrieved successfully",
+            "msg": "获取用户信息成功",
             "data": response_data
         }
     
@@ -185,7 +185,7 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         # 需要认证
         auth_header = self.request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return {"code": 401, "msg": "Authentication required", "data": {}}
+            return {"code": 401, "msg": "未认证，请先登录", "data": {}}
         
         token = auth_header.split(" ")[1]
         
@@ -195,11 +195,11 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         # 获取用户信息
         user_info = self.get_auth_user(token)
         if not user_info:
-            return {"code": 401, "msg": "Invalid token", "data": {}}
+            return {"code": 401, "msg": "令牌无效", "data": {}}
         
         user = await User.get(user_info.get("sub"))
         if not user:
-            return {"code": 404, "msg": "User not found", "data": {}}
+            return {"code": 404, "msg": "用户不存在", "data": {}}
         
         data = json.loads(self.request.body)
         
@@ -214,7 +214,7 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
                 "_id": {"$ne": user.id}
             })
             if existing_email:
-                return {"code": 400, "msg": "Email already exists", "data": {}}
+                return {"code": 400, "msg": "邮箱已存在", "data": {}}
             user.email = data["email"]
         
         user.updated_at = datetime.utcnow()
@@ -235,6 +235,6 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         
         return {
             "code": 200,
-            "msg": "Profile updated successfully",
+            "msg": "用户信息更新成功",
             "data": response_data
         } 

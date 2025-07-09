@@ -48,7 +48,7 @@ def auth_middleware(handler_class):
                 self.set_status(401)
                 self.write(json.dumps({
                     "code": 401,
-                    "msg": "Token has expired, please login again",
+                    "msg": "令牌已过期，请重新登录",
                     "data": {}
                 }))
                 self.finish()

@@ -21,11 +21,11 @@ class RoleHandler(RequestHandler, PermissionMixin):
             # 获取单个角色
             role = await Role.get(role_id)
             if not role:
-                return {"code": 404, "msg": "Role not found", "data": {}}
+                return {"code": 404, "msg": "角色不存在", "data": {}}
             
             return {
                 "code": 200,
-                "msg": "Role retrieved successfully",
+                "msg": "获取角色成功",
                 "data": {
                     "id": str(role.id),
                     "name": role.name,
@@ -59,7 +59,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
             
             return {
                 "code": 200,
-                "msg": "Roles retrieved successfully",
+                "msg": "获取角色列表成功",
                 "data": {
                     "roles": role_list,
                     "pagination": {
@@ -79,12 +79,12 @@ class RoleHandler(RequestHandler, PermissionMixin):
         
         # 验证必填字段
         if not data.get("name"):
-            return {"code": 400, "msg": "Role name is required", "data": {}}
+            return {"code": 400, "msg": "角色名称为必填项", "data": {}}
         
         # 检查角色名是否已存在
         existing_role = await Role.find_one({"name": data["name"]})
         if existing_role:
-            return {"code": 400, "msg": "Role name already exists", "data": {}}
+            return {"code": 400, "msg": "角色名称已存在", "data": {}}
         
         # 创建角色
         current_user_id = await self.get_current_user_id()
@@ -99,7 +99,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
         
         return {
             "code": 201,
-            "msg": "Role created successfully",
+            "msg": "角色创建成功",
             "data": {"role_id": str(role.id)}
         }
     
@@ -109,11 +109,11 @@ class RoleHandler(RequestHandler, PermissionMixin):
         """更新角色"""
         role = await Role.get(role_id)
         if not role:
-            return {"code": 404, "msg": "Role not found", "data": {}}
+            return {"code": 404, "msg": "角色不存在", "data": {}}
         
         # 系统角色不允许修改
         if role.is_system:
-            return {"code": 403, "msg": "System roles cannot be modified", "data": {}}
+            return {"code": 403, "msg": "系统角色不允许修改", "data": {}}
         
         data = json.loads(self.request.body)
         
@@ -125,7 +125,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
                 "_id": {"$ne": role.id}
             })
             if existing_role:
-                return {"code": 400, "msg": "Role name already exists", "data": {}}
+                return {"code": 400, "msg": "角色名称已存在", "data": {}}
             role.name = data["name"]
         
         if "description" in data:
@@ -139,7 +139,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
         
         return {
             "code": 200,
-            "msg": "Role updated successfully",
+            "msg": "角色更新成功",
             "data": {"role_id": str(role.id)}
         }
     
@@ -149,11 +149,11 @@ class RoleHandler(RequestHandler, PermissionMixin):
         """删除角色"""
         role = await Role.get(role_id)
         if not role:
-            return {"code": 404, "msg": "Role not found", "data": {}}
+            return {"code": 404, "msg": "角色不存在", "data": {}}
         
         # 系统角色不允许删除
         if role.is_system:
-            return {"code": 403, "msg": "System roles cannot be deleted", "data": {}}
+            return {"code": 403, "msg": "系统角色不允许删除", "data": {}}
         
         # 软删除
         role.is_active = False
@@ -162,7 +162,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
         
         return {
             "code": 200,
-            "msg": "Role deleted successfully",
+            "msg": "角色删除成功",
             "data": {}
         }
 
@@ -178,11 +178,11 @@ class PermissionHandler(RequestHandler, PermissionMixin):
             # 获取单个权限
             permission = await Permission.get(permission_id)
             if not permission:
-                return {"code": 404, "msg": "Permission not found", "data": {}}
+                return {"code": 404, "msg": "权限不存在", "data": {}}
             
             return {
                 "code": 200,
-                "msg": "Permission retrieved successfully",
+                "msg": "获取权限成功",
                 "data": {
                     "id": str(permission.id),
                     "name": permission.name,

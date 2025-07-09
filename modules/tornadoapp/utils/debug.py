@@ -36,11 +36,11 @@ class DebugHandler(RequestHandler):
 
         if (expired := self.get_argument("expired", "-1")) == "-1":
             self.turn_off_debug()
-            self.write({"code": 0, "msg": "debug off"})
+            self.write({"code": 0, "msg": "调试已关闭"})
             return
 
         self.turn_on_debug(expired=int(expired))
-        self.write({"code": 0, "msg": "debug on", "expired": int(expired)})
+        self.write({"code": 0, "msg": "调试已开启", "expired": int(expired)})
 
 
 def add_debug_handler(app):
