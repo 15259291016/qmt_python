@@ -4,6 +4,7 @@ from motor.motor_tornado import MotorClient
 from dotenv import load_dotenv
 
 from modules.tornadoapp.model import demomodel
+from modules.tornadoapp.model.user_model import User, UserSession
 
 # 加载环境变量
 load_dotenv()
@@ -46,7 +47,14 @@ demo_db_client = CustomMotorClient(DEFAULT_CONFIG, DEFAULT_DB_NAME)
 async def init_beanie():
     """初始化Beanie ODM"""
     database = demo_db_client.db
-    await _init_beanie(database=database, document_models=[demomodel.DemoModel])
+    await _init_beanie(
+        database=database, 
+        document_models=[
+            demomodel.DemoModel,
+            User,
+            UserSession
+        ]
+    )
 
 
 def create_db_client(config=None, db_name=None):

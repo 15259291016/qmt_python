@@ -9,8 +9,19 @@ import tornado.web
 import tornado.websocket
 
 from modules.tornadoapp.handler.mainHandler import MainHandler
+from modules.tornadoapp.handler.auth_handler import (
+    RegisterHandler,
+    LoginHandler,
+    RefreshTokenHandler
+)
 
 app = tornado.web.Application([
+    # 主页面
     (r"/", MainHandler),
+    
+    # 用户认证相关路由
+    (r"/api/auth/register", RegisterHandler),
+    (r"/api/auth/login", LoginHandler),
+    (r"/api/auth/refresh", RefreshTokenHandler),
 ])
 # 
