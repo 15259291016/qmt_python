@@ -16,8 +16,11 @@ from modules.tornadoapp.handler.auth_handler import (
     LogoutHandler,
     ProfileHandler
 )
+from modules.tornadoapp.middleware.middleware_manager import create_app_with_middlewares
 
-app = tornado.web.Application([
+
+# 定义路由
+routes = [
     # 主页面
     (r"/", MainHandler),
     
@@ -27,5 +30,12 @@ app = tornado.web.Application([
     (r"/api/auth/refresh", RefreshTokenHandler),
     (r"/api/auth/logout", LogoutHandler),
     (r"/api/auth/profile", ProfileHandler),
-])
+]
+
+# 创建带中间件的应用
+app = create_app_with_middlewares(
+    routes=routes,
+    enable_auth=True,  # 启用认证中间件
+    debug=True  # 开发模式
+)
 # 
