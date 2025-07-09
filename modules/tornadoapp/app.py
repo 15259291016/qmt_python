@@ -116,117 +116,6 @@ class RefreshTokenHandler(tornado.web.RequestHandler):
         }
 
 
-class LogoutHandler(tornado.web.RequestHandler):
-    """用户登出处理器"""
-    
-    @try_except_async_request
-    async def post(self):
-        auth_header = self.request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return {"code": 400, "msg": "Authorization header required", "data": {}}
-        
-        token = auth_header.split(" ")[1]
-        
-        # 查找并停用会话
-        session = await UserSession.find_one({
-            "token": token,
-            "is_active": True
-        })
-        
-        if session:
-            session.is_active = False
-            await session.save()
-        
-        return {
-            "code": 200,
-            "msg": "Logout successful",
-            "data": {}
-        }
-
-
-class ProfileHandler(tornado.web.RequestHandler):
-    """用户资料处理器"""
-    
-    @try_except_async_request
-    async def get(self):
-        # 需要认证
-        auth_header = self.request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return {"code": 401, "msg": "Authentication required", "data": {}}
-        
-        token = auth_header.split(" ")[1]
-        payload = AuthUtils.verify_token(token)
-        
-        if not payload:
-            return {"code": 401, "msg": "Invalid token", "data": {}}
-        
-        user = await User.get(payload.get("sub"))
-        if not user:
-            return {"code": 404, "msg": "User not found", "data": {}}
-        
-        return {
-            "code": 200,
-            "msg": "Profile retrieved successfully",
-            "data": {
-                "id": str(user.id),
-                "username": user.username,
-                "email": user.email,
-                "full_name": user.full_name,
-                "is_admin": user.is_admin,
-                "created_at": user.created_at.isoformat(),
-                "last_login": user.last_login.isoformat() if user.last_login else None
-            }
-        }
-    
-    @try_except_async_request
-    async def put(self):
-        # 需要认证
-        auth_header = self.request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return {"code": 401, "msg": "Authentication required", "data": {}}
-        
-        token = auth_header.split(" ")[1]
-        payload = AuthUtils.verify_token(token)
-        
-        if not payload:
-            return {"code": 401, "msg": "Invalid token", "data": {}}
-        
-        user = await User.get(payload.get("sub"))
-        if not user:
-            return {"code": 404, "msg": "User not found", "data": {}}
-        
-        data = json.loads(self.request.body)
-        
-        # 更新允许的字段
-        if "full_name" in data:
-            user.full_name = data["full_name"]
-        
-        if "email" in data:
-            # 检查邮箱是否已被其他用户使用
-            existing_email = await User.find_one({
-                "email": data["email"],
-                "_id": {"$ne": user.id}
-            })
-            if existing_email:
-                return {"code": 400, "msg": "Email already exists", "data": {}}
-            user.email = data["email"]
-        
-        user.updated_at = datetime.utcnow()
-        await user.save()
-        
-        return {
-            "code": 200,
-            "msg": "Profile updated successfully",
-            "data": {
-                "id": str(user.id),
-                "username": user.username,
-                "email": user.email,
-                "full_name": user.full_name,
-                "is_admin": user.is_admin
-            }
-        }
-
-
 app = tornado.web.Application([
     # 主页面
     (r"/", MainHandler),
@@ -235,7 +124,5 @@ app = tornado.web.Application([
     (r"/api/auth/register", RegisterHandler),
     (r"/api/auth/login", LoginHandler),
     (r"/api/auth/refresh", RefreshTokenHandler),
-    (r"/api/auth/logout", LogoutHandler),
-    (r"/api/auth/profile", ProfileHandler),
 ])
 # 
