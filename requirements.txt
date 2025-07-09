@@ -8,6 +8,7 @@ APScheduler==3.11.0
 attrs==25.3.0
 beanie==1.30.0
 beautifulsoup4==4.13.4
+bios==0.1.2
 certifi==2025.7.9
 charset-normalizer==3.4.2
 click==8.2.1
@@ -23,13 +24,18 @@ idna==3.10
 jsonpath==0.82.2
 kiwisolver==1.4.8
 lazy-model==0.2.0
+line_profiler==4.2.0
+loguru==0.7.3
 lxml==6.0.0
+markdown-it-py==3.0.0
 matplotlib==3.10.3
+mdurl==0.1.2
 motor==3.7.1
 multidict==6.6.3
 nest-asyncio==1.6.0
 numpy==2.3.1
 openpyxl==3.1.5
+oyaml==1.0
 packaging==25.0
 pandas==2.3.1
 pillow==11.3.0
@@ -37,17 +43,19 @@ propcache==0.3.2
 py-mini-racer==0.6.0
 pydantic==2.11.7
 pydantic_core==2.33.2
+Pygments==2.19.2
 pymongo==4.13.2
 pyparsing==3.2.3
 python-dateutil==2.9.0.post0
 pytz==2025.2
 PyYAML==6.0.2
 requests==2.32.4
+rich==14.0.0
 seaborn==0.13.2
 six==1.17.0
 soupsieve==2.7
 tabulate==0.9.0
-tornado==6.5.1
+tornado @ file:///croot/tornado_1748956929273/work
 tqdm==4.67.1
 typing-inspection==0.4.1
 typing_extensions==4.14.1
