@@ -13,3 +13,6 @@ __pycache__/
 files/
 */default.log
 logs
+
+# 环境变量文件
+.env
