@@ -60,7 +60,56 @@ class AuthUtils:
             return payload
         except jwt.ExpiredSignatureError:
             return None
-        except jwt.JWTError:
+        except (jwt.InvalidTokenError, jwt.DecodeError):
+            return None
+    
+    @staticmethod
+    def verify_token_with_expiry(token: str) -> Dict[str, Any]:
+        """验证token并返回详细状态信息"""
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return {
+                "valid": True,
+                "expired": False,
+                "payload": payload,
+                "expires_at": datetime.fromtimestamp(payload.get("exp", 0)),
+                "remaining_seconds": payload.get("exp", 0) - datetime.utcnow().timestamp()
+            }
+        except jwt.ExpiredSignatureError:
+            return {
+                "valid": False,
+                "expired": True,
+                "payload": None,
+                "expires_at": None,
+                "remaining_seconds": 0
+            }
+        except (jwt.InvalidTokenError, jwt.DecodeError):
+            return {
+                "valid": False,
+                "expired": False,
+                "payload": None,
+                "expires_at": None,
+                "remaining_seconds": 0
+            }
+    
+    @staticmethod
+    def is_token_expired(token: str) -> bool:
+        """检查token是否过期"""
+        try:
+            jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return False
+        except jwt.ExpiredSignatureError:
+            return True
+        except (jwt.InvalidTokenError, jwt.DecodeError):
+            return True
+    
+    @staticmethod
+    def get_token_expiry_time(token: str) -> Optional[datetime]:
+        """获取token过期时间"""
+        try:
+            payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+            return datetime.fromtimestamp(payload.get("exp", 0))
+        except (jwt.InvalidTokenError, jwt.DecodeError):
             return None
     
     @staticmethod

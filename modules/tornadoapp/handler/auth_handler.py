@@ -145,27 +145,45 @@ class ProfileHandler(RequestHandler):
             return {"code": 401, "msg": "Authentication required", "data": {}}
         
         token = auth_header.split(" ")[1]
-        payload = AuthUtils.verify_token(token)
         
-        if not payload:
-            return {"code": 401, "msg": "Invalid token", "data": {}}
+        # 方法1：简单检查token是否过期
+        if AuthUtils.is_token_expired(token):
+            return {"code": 401, "msg": "Token has expired", "data": {}}
         
+        # 方法2：获取详细的token信息
+        token_info = AuthUtils.verify_token_with_expiry(token)
+        if not token_info["valid"]:
+            if token_info["expired"]:
+                return {"code": 401, "msg": "Token has expired", "data": {}}
+            else:
+                return {"code": 401, "msg": "Invalid token", "data": {}}
+        
+        payload = token_info["payload"]
         user = await User.get(payload.get("sub"))
         if not user:
             return {"code": 404, "msg": "User not found", "data": {}}
         
+        # 方法3：获取token过期时间并检查是否需要警告
+        expiry_time = AuthUtils.get_token_expiry_time(token)
+        response_data = {
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_admin": user.is_admin,
+            "created_at": user.created_at.isoformat(),
+            "last_login": user.last_login.isoformat() if user.last_login else None
+        }
+        
+        if expiry_time:
+            remaining_seconds = token_info["remaining_seconds"]
+            if remaining_seconds < 300:  # 如果剩余时间少于5分钟，提示用户刷新token
+                response_data["token_warning"] = f"Token will expire in {int(remaining_seconds)} seconds"
+        
         return {
             "code": 200,
             "msg": "Profile retrieved successfully",
-            "data": {
-                "id": str(user.id),
-                "username": user.username,
-                "email": user.email,
-                "full_name": user.full_name,
-                "is_admin": user.is_admin,
-                "created_at": user.created_at.isoformat(),
-                "last_login": user.last_login.isoformat() if user.last_login else None
-            }
+            "data": response_data
         }
     
     @try_except_async_request
