@@ -108,7 +108,7 @@ def auth_middleware(handler_class):
     return AuthMiddlewareHandler
 
 
-class SilentRefreshMixin(RequestHandler):
+class SilentRefreshMixin:
     """无感刷新混入类，可以在处理器中使用"""
     
     async def handle_silent_refresh(self, token: str) -> Optional[Dict[str, str]]:
@@ -136,9 +136,10 @@ class SilentRefreshMixin(RequestHandler):
                     )
                     
                     # 在响应头中设置新token
-                    self.set_header("X-New-Access-Token", new_tokens["access_token"])
-                    self.set_header("X-New-Refresh-Token", new_tokens["refresh_token"])
-                    self.set_header("X-Token-Refreshed", "true")
+                    if hasattr(self, 'set_header'):
+                        self.set_header("X-New-Access-Token", new_tokens["access_token"])
+                        self.set_header("X-New-Refresh-Token", new_tokens["refresh_token"])
+                        self.set_header("X-Token-Refreshed", "true")
                     
                     return new_tokens
         
