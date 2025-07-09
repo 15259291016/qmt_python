@@ -4,6 +4,7 @@ from tornado.web import RequestHandler
 from modules.tornadoapp.utils.auth import AuthUtils
 from modules.tornadoapp.model.user_model import User, UserSession
 from modules.tornadoapp.utils.response_model import try_except_async_request
+from modules.tornadoapp.middleware.auth_middleware import SilentRefreshMixin
 
 
 class RegisterHandler(RequestHandler):
@@ -134,8 +135,8 @@ class LogoutHandler(RequestHandler):
         }
 
 
-class ProfileHandler(RequestHandler):
-    """用户资料处理器"""
+class ProfileHandler(RequestHandler, SilentRefreshMixin):
+    """用户资料处理器（支持无感刷新）"""
     
     @try_except_async_request
     async def get(self):
@@ -146,25 +147,18 @@ class ProfileHandler(RequestHandler):
         
         token = auth_header.split(" ")[1]
         
-        # 方法1：简单检查token是否过期
-        if AuthUtils.is_token_expired(token):
-            return {"code": 401, "msg": "Token has expired", "data": {}}
+        # 处理无感刷新
+        new_tokens = await self.handle_silent_refresh(token)
         
-        # 方法2：获取详细的token信息
-        token_info = AuthUtils.verify_token_with_expiry(token)
-        if not token_info["valid"]:
-            if token_info["expired"]:
-                return {"code": 401, "msg": "Token has expired", "data": {}}
-            else:
-                return {"code": 401, "msg": "Invalid token", "data": {}}
+        # 获取用户信息
+        user_info = self.get_auth_user(token)
+        if not user_info:
+            return {"code": 401, "msg": "Invalid token", "data": {}}
         
-        payload = token_info["payload"]
-        user = await User.get(payload.get("sub"))
+        user = await User.get(user_info.get("sub"))
         if not user:
             return {"code": 404, "msg": "User not found", "data": {}}
         
-        # 方法3：获取token过期时间并检查是否需要警告
-        expiry_time = AuthUtils.get_token_expiry_time(token)
         response_data = {
             "id": str(user.id),
             "username": user.username,
@@ -175,10 +169,10 @@ class ProfileHandler(RequestHandler):
             "last_login": user.last_login.isoformat() if user.last_login else None
         }
         
-        if expiry_time:
-            remaining_seconds = token_info["remaining_seconds"]
-            if remaining_seconds < 300:  # 如果剩余时间少于5分钟，提示用户刷新token
-                response_data["token_warning"] = f"Token will expire in {int(remaining_seconds)} seconds"
+        # 如果token被刷新了，在响应中提示
+        if new_tokens:
+            response_data["token_refreshed"] = True
+            response_data["new_tokens"] = new_tokens
         
         return {
             "code": 200,
@@ -194,12 +188,16 @@ class ProfileHandler(RequestHandler):
             return {"code": 401, "msg": "Authentication required", "data": {}}
         
         token = auth_header.split(" ")[1]
-        payload = AuthUtils.verify_token(token)
         
-        if not payload:
+        # 处理无感刷新
+        new_tokens = await self.handle_silent_refresh(token)
+        
+        # 获取用户信息
+        user_info = self.get_auth_user(token)
+        if not user_info:
             return {"code": 401, "msg": "Invalid token", "data": {}}
         
-        user = await User.get(payload.get("sub"))
+        user = await User.get(user_info.get("sub"))
         if not user:
             return {"code": 404, "msg": "User not found", "data": {}}
         
@@ -222,14 +220,21 @@ class ProfileHandler(RequestHandler):
         user.updated_at = datetime.utcnow()
         await user.save()
         
+        response_data = {
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_admin": user.is_admin
+        }
+        
+        # 如果token被刷新了，在响应中提示
+        if new_tokens:
+            response_data["token_refreshed"] = True
+            response_data["new_tokens"] = new_tokens
+        
         return {
             "code": 200,
             "msg": "Profile updated successfully",
-            "data": {
-                "id": str(user.id),
-                "username": user.username,
-                "email": user.email,
-                "full_name": user.full_name,
-                "is_admin": user.is_admin
-            }
+            "data": response_data
         } 
