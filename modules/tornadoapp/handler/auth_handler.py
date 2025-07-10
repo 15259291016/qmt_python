@@ -16,12 +16,12 @@ class RegisterHandler(RequestHandler):
         
         # 验证必填字段
         if not data.get("username") or not data.get("email") or not data.get("password"):
-            return FailedResponse(code=400, msg="用户名、邮箱和密码为必填项")
+            return FailedResponse(msg="用户名、邮箱和密码为必填项")
         
         # 检查用户名是否已存在
         existing_user = await User.find_one({"username": data["username"]})
         if existing_user:
-            return FailedResponse(code=400, msg="用户名已存在")
+            return FailedResponse(msg="用户名已存在")
         
         # 创建用户
         user = User(
@@ -46,16 +46,16 @@ class LoginHandler(RequestHandler):
         data = json.loads(self.request.body)
         
         if not data.get("username") or not data.get("password"):
-            return FailedResponse(code=400, msg="用户名和密码为必填项")
+            return FailedResponse(msg="用户名和密码为必填项")
         
         # 查找用户
         user = await User.find_one({"username": data["username"]})
         if not user or not AuthUtils.verify_password(data["password"], user.password_hash):
-            return FailedResponse(code=401, msg="用户名或密码错误")
+            return FailedResponse(msg="用户名或密码错误")
         
         # 移除订阅到期校验，允许订阅过期的用户也能登录
         # if not user.subscription_expire_at or user.subscription_expire_at < datetime.utcnow():
-        #     return FailedResponse(code=403, msg="订阅已到期，请续费")
+        #     return FailedResponse(msg="订阅已到期，请续费")
         
         # 创建token对
         token_pair = AuthUtils.create_token_pair(str(user.id), user.username, user.is_admin)
@@ -87,17 +87,17 @@ class RefreshTokenHandler(RequestHandler):
         data = json.loads(self.request.body)
         
         if not data.get("refresh_token"):
-            return FailedResponse(code=400, msg="刷新令牌为必填项")
+            return FailedResponse(msg="刷新令牌为必填项")
         
         # 验证刷新token
         payload = AuthUtils.verify_token(data["refresh_token"])
         if not payload or payload.get("type") != "refresh":
-            return FailedResponse(code=401, msg="刷新令牌无效")
+            return FailedResponse(msg="刷新令牌无效")
         
         # 查找用户
         user = await User.get(payload.get("sub"))
         if not user or not user.is_active:
-            return FailedResponse(code=401, msg="用户不存在或已禁用")
+            return FailedResponse(msg="用户不存在或已禁用")
         
         # 创建新的token对
         new_token_pair = AuthUtils.create_token_pair(str(user.id), user.username, user.is_admin)
@@ -115,7 +115,7 @@ class LogoutHandler(RequestHandler):
     async def post(self):
         auth_header = self.request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return FailedResponse(code=400, msg="缺少Authorization头")
+            return FailedResponse(msg="缺少Authorization头")
         
         token = auth_header.split(" ")[1]
         
@@ -140,7 +140,7 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         # 需要认证
         auth_header = self.request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return FailedResponse(code=401, msg="未认证，请先登录")
+            return FailedResponse(msg="未认证，请先登录")
         
         token = auth_header.split(" ")[1]
         
@@ -150,11 +150,11 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
         # 获取用户信息
         user_info = self.get_auth_user(token)
         if not user_info:
-            return FailedResponse(code=401, msg="令牌无效")
+            return FailedResponse(msg="令牌无效")
         
         user = await User.get(user_info.get("sub"))
         if not user:
-            return FailedResponse(code=404, msg="用户不存在")
+            return FailedResponse(msg="用户不存在")
         
         response_data = {
             "id": str(user.id),
@@ -172,4 +172,44 @@ class ProfileHandler(RequestHandler, SilentRefreshMixin):
             response_data["token_refreshed"] = True
             response_data["new_tokens"] = new_tokens
         
+        return response_data 
+
+    @try_except_async_request
+    async def put(self):
+        """修改当前用户信息"""
+        auth_header = self.request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return FailedResponse(msg="未认证，请先登录")
+        token = auth_header.split(" ")[1]
+        user_info = self.get_auth_user(token)
+        if not user_info:
+            return FailedResponse(msg="令牌无效")
+        user = await User.get(user_info.get("sub"))
+        if not user:
+            return FailedResponse(msg="用户不存在")
+        data = json.loads(self.request.body)
+        # 可选字段更新
+        if "username" in data and data["username"]:
+            user.username = data["username"]
+        if "email" in data and data["email"]:
+            user.email = data["email"]
+        if "full_name" in data:
+            user.full_name = data["full_name"]
+        if "is_admin" in data:
+            user.is_admin = bool(data["is_admin"])
+        if "password" in data and data["password"]:
+            user.password_hash = AuthUtils.hash_password(data["password"])
+        user.updated_at = datetime.utcnow()
+        await user.save()
+        response_data = {
+            "id": str(user.id),
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_admin": user.is_admin,
+            "subscription_expire_at": user.subscription_expire_at.isoformat() if user.subscription_expire_at else None,
+            "created_at": user.created_at.isoformat(),
+            "updated_at": user.updated_at.isoformat(),
+            "last_login": user.last_login.isoformat() if user.last_login else None
+        }
         return response_data 
