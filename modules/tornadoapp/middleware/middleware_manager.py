@@ -5,6 +5,7 @@
 from typing import List, Tuple, Type, Any
 from tornado.web import Application, RequestHandler
 from .auth_middleware import auth_middleware
+from .cors_middleware import cors_middleware
 
 
 class MiddlewareManager:
@@ -32,13 +33,14 @@ class MiddlewareManager:
         return processed_routes
 
 
-def create_app_with_middlewares(routes, enable_auth=True, **kwargs):
+def create_app_with_middlewares(routes, enable_auth=True, enable_cors=True, **kwargs):
     """
     创建带中间件的应用
     
     Args:
         routes: 路由列表
         enable_auth: 是否启用认证中间件
+        enable_cors: 是否启用 CORS 中间件
         **kwargs: 其他应用参数
     
     Returns:
@@ -46,6 +48,10 @@ def create_app_with_middlewares(routes, enable_auth=True, **kwargs):
     """
     # 创建中间件管理器
     manager = MiddlewareManager()
+    
+    # 添加 CORS 中间件（优先于认证中间件）
+    if enable_cors:
+        manager.add_middleware(cors_middleware)
     
     # 添加认证中间件
     if enable_auth:

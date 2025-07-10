@@ -70,6 +70,7 @@ routes = [
 app = create_app_with_middlewares(
     routes=routes,
     enable_auth=True,  # 启用认证中间件
+    enable_cors=True,  # 启用 CORS 中间件
     debug=True  # 开发模式
 )
 # 
