@@ -16,7 +16,7 @@ class User(Document):
     created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.utcnow, description="更新时间")
     last_login: Optional[datetime] = Field(None, description="最后登录时间")
-    subscription_expire_at: datetime = Field(default=None, description="订阅到期时间")
+    subscription_expire_at: Optional[datetime] = Field(None, description="订阅到期时间")
     
     class Settings:
         name = "users"
