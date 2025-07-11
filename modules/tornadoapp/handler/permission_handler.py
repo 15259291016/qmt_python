@@ -257,6 +257,39 @@ class PermissionHandler(RequestHandler, PermissionMixin):
             "msg": "权限创建成功",
             "data": {"permission_id": str(permission.id)}
         }
+    
+    @try_except_async_request
+    @require_permission("permission:delete")
+    async def delete(self, permission_id):
+        """删除权限"""
+        permission = await Permission.get(permission_id)
+        if not permission:
+            return {"code": 404, "msg": "权限不存在", "data": {}}
+        
+        # 检查是否有角色在使用此权限
+        roles_using_permission = await Role.find({
+            "permissions": permission_id,
+            "is_active": True
+        }).to_list()
+        
+        if roles_using_permission:
+            role_names = [role.name for role in roles_using_permission]
+            return {
+                "code": 400, 
+                "msg": f"权限正在被以下角色使用，无法删除：{', '.join(role_names)}", 
+                "data": {}
+            }
+        
+        # 软删除
+        permission.is_active = False
+        permission.updated_at = datetime.utcnow()
+        await permission.save()
+        
+        return {
+            "code": 200,
+            "msg": "权限删除成功",
+            "data": {}
+        }
 
 
 class UserRoleHandler(RequestHandler, PermissionMixin):

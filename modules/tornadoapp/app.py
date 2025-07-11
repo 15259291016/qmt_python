@@ -22,6 +22,11 @@ from modules.tornadoapp.handler.permission_handler import (
     UserRoleHandler,
     UserPermissionHandler
 )
+from modules.tornadoapp.handler.user_handler import (
+    UserHandler,
+    UserRoleManagementHandler,
+    UserStatsHandler
+)
 from modules.tornadoapp.handler.business_handler import (
     DataHandler,
     SystemHandler,
@@ -56,12 +61,17 @@ routes = [
     (r"/api/users/([^/]+)/permissions", UserPermissionHandler),
     (r"/api/permissions", UserPermissionHandler),  # 当前用户权限
     
+    # 用户管理相关路由
+    (r"/api/users", UserHandler),
+    (r"/api/users/([^/]+)", UserHandler),
+    (r"/api/users/([^/]+)/roles", UserRoleManagementHandler),
+    (r"/api/users/([^/]+)/roles/([^/]+)", UserRoleManagementHandler),
+    (r"/api/users/stats", UserStatsHandler),
+    
     # 业务处理器路由 - 展示权限使用
     (r"/api/data", DataHandler),
     (r"/api/data/([^/]+)", DataHandler),
     (r"/api/system", SystemHandler),
-    (r"/api/users", UserManagementHandler),
-    (r"/api/users/([^/]+)", UserManagementHandler),
     (r"/api/admin", RoleBasedHandler),
     (r"/api/mixed-permissions", MixedPermissionHandler),
 ]
