@@ -25,23 +25,49 @@ class PermissionUtils:
     @staticmethod
     async def get_user_permissions(user_id: str) -> List[str]:
         """获取用户的所有权限"""
+        # 首先检查用户是否是超级管理员
+        user = await User.get(user_id)
+        if user and user.is_super_admin:
+            # 超级管理员拥有所有权限
+            all_permissions = await Permission.find({"is_active": True}).to_list()
+            return [perm.name for perm in all_permissions]
+        
+        # 普通用户通过角色获取权限
         roles = await PermissionUtils.get_user_roles(user_id)
         
-        permissions = set()
+        permission_ids = set()
         for role in roles:
-            permissions.update(role.permissions)
+            permission_ids.update(role.permissions)
         
-        return list(permissions)
+        # 根据权限ID获取权限名称
+        if permission_ids:
+            permissions = await Permission.find({"_id": {"$in": list(permission_ids)}, "is_active": True}).to_list()
+            return [perm.name for perm in permissions]
+        
+        return []
     
     @staticmethod
     async def check_permission(user_id: str, required_permission: str) -> bool:
         """检查用户是否有指定权限"""
+        # 首先检查用户是否是超级管理员
+        user = await User.get(user_id)
+        if user and user.is_super_admin:
+            return True  # 超级管理员拥有所有权限
+        
+        # 普通用户检查具体权限
         user_permissions = await PermissionUtils.get_user_permissions(user_id)
         return required_permission in user_permissions
     
     @staticmethod
     async def check_permissions(user_id: str, required_permissions: List[str]) -> Dict[str, bool]:
         """检查用户是否有指定权限列表"""
+        # 首先检查用户是否是超级管理员
+        user = await User.get(user_id)
+        if user and user.is_super_admin:
+            # 超级管理员拥有所有权限
+            return {permission: True for permission in required_permissions}
+        
+        # 普通用户检查具体权限
         user_permissions = await PermissionUtils.get_user_permissions(user_id)
         
         result = {}
@@ -162,20 +188,42 @@ class PermissionUtils:
     @staticmethod
     async def is_admin(user_id: str) -> bool:
         """检查用户是否是管理员"""
+        user = await User.get(user_id)
+        if user and user.is_super_admin:
+            return True  # 超级管理员也是管理员
+        
         return await PermissionUtils.check_permission(user_id, "system:admin")
+    
+    @staticmethod
+    async def is_super_admin(user_id: str) -> bool:
+        """检查用户是否是超级管理员"""
+        user = await User.get(user_id)
+        return user and user.is_super_admin
     
     @staticmethod
     async def get_user_permission_summary(user_id: str) -> Dict[str, Any]:
         """获取用户权限摘要"""
+        user = await User.get(user_id)
+        if not user:
+            return {}
+        
         roles = await PermissionUtils.get_user_roles(user_id)
         permissions = await PermissionUtils.get_user_permissions(user_id)
         is_admin = await PermissionUtils.is_admin(user_id)
+        is_super_admin = await PermissionUtils.is_super_admin(user_id)
         
         return {
             "user_id": user_id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_active": user.is_active,
+            "is_admin": user.is_admin,
+            "is_super_admin": user.is_super_admin,
             "roles": [{"id": str(role.id), "name": role.name, "description": role.description} for role in roles],
             "permissions": permissions,
-            "is_admin": is_admin,
+            "is_admin_user": is_admin,
+            "is_super_admin_user": is_super_admin,
             "total_roles": len(roles),
             "total_permissions": len(permissions)
         } 

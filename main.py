@@ -54,7 +54,6 @@ async def main():
     # scheduler.shutdown()
     # 导入tornado app
     pass
-
 if __name__ == "__main__":
     import tornado.ioloop
 
@@ -64,3 +63,4 @@ if __name__ == "__main__":
     http_server = tornado.httpserver.HTTPServer(app, max_body_size=1024**3 * 5)
     http_server.listen(8888)
     tornado.ioloop.IOLoop.current().start()
+

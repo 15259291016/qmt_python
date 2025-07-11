@@ -36,6 +36,7 @@ from modules.tornadoapp.handler.business_handler import (
 )
 from modules.tornadoapp.handler.subscribe_handler import SubscribeHandler
 from modules.tornadoapp.middleware.middleware_manager import create_app_with_middlewares
+from modules.tornadoapp.handler.super_admin_handler import SuperAdminHandler
 
 
 # 定义路由
@@ -67,6 +68,10 @@ routes = [
     (r"/api/users/([^/]+)/roles", UserRoleManagementHandler),
     (r"/api/users/([^/]+)/roles/([^/]+)", UserRoleManagementHandler),
     (r"/api/users/stats", UserStatsHandler),
+    
+    # 超级管理员管理路由
+    (r"/api/super-admin", SuperAdminHandler),
+    (r"/api/super-admin/([^/]+)", SuperAdminHandler),
     
     # 业务处理器路由 - 展示权限使用
     (r"/api/data", DataHandler),

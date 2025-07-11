@@ -13,6 +13,7 @@ class User(Document):
     full_name: Optional[str] = Field(None, description="全名")
     is_active: bool = Field(default=True, description="是否激活")
     is_admin: bool = Field(default=False, description="是否管理员")
+    is_super_admin: bool = Field(default=False, description="是否超级管理员")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.utcnow, description="更新时间")
     last_login: Optional[datetime] = Field(None, description="最后登录时间")
@@ -24,6 +25,8 @@ class User(Document):
             "username",
             "email",
             ("username", "email"),
+            "is_admin",
+            "is_super_admin",
         ]
     
     class Config:
@@ -33,7 +36,8 @@ class User(Document):
                 "email": "test@example.com",
                 "full_name": "Test User",
                 "is_active": True,
-                "is_admin": False
+                "is_admin": False,
+                "is_super_admin": False
             }
         }
 
