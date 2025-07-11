@@ -4,7 +4,7 @@ from modules.tornadoapp.utils.permission_decorator import (
     require_permission, require_permissions, require_admin, 
     require_role, require_roles, PermissionMixin
 )
-from modules.tornadoapp.utils.response_model import try_except_async_request
+from modules.tornadoapp.utils.response_model import try_except_async_request, FailedResponse
 
 
 class DataHandler(RequestHandler, PermissionMixin):
@@ -43,7 +43,7 @@ class DataHandler(RequestHandler, PermissionMixin):
         data = json.loads(self.request.body)
         
         if not data.get("name"):
-            return {"code": 400, "msg": "数据名称不能为空", "data": {}}
+            return FailedResponse(msg="数据名称不能为空")
         
         new_data = {
             "id": "new_id",
@@ -164,7 +164,7 @@ class UserManagementHandler(RequestHandler, PermissionMixin):
         data = json.loads(self.request.body)
         
         if not data.get("username") or not data.get("email"):
-            return {"code": 400, "msg": "用户名和邮箱不能为空", "data": {}}
+            return FailedResponse(msg="用户名和邮箱不能为空")
         
         new_user = {
             "id": "new_user_id",
@@ -280,7 +280,7 @@ class MixedPermissionHandler(RequestHandler, PermissionMixin):
             has_permission = False
         
         if not has_permission:
-            return {"code": 403, "msg": f"没有执行{action}的权限", "data": {}}
+            return FailedResponse(msg=f"没有执行{action}的权限")
         
         return {
             "code": 200,

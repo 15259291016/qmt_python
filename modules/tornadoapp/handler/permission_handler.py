@@ -7,7 +7,7 @@ from modules.tornadoapp.utils.permission_decorator import (
     require_permission, require_permissions, require_admin, 
     require_role, PermissionMixin
 )
-from modules.tornadoapp.utils.response_model import try_except_async_request
+from modules.tornadoapp.utils.response_model import try_except_async_request, FailedResponse
 
 
 class RoleHandler(RequestHandler, PermissionMixin):
@@ -21,7 +21,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
             # 获取单个角色
             role = await Role.get(role_id)
             if not role:
-                return {"code": 404, "msg": "角色不存在", "data": {}}
+                return FailedResponse(msg="角色不存在")
             
             return {
                 "code": 200,
@@ -44,7 +44,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
             skip = (page - 1) * limit
             
             roles = await Role.find({"is_active": True}).skip(skip).limit(limit).to_list()
-            total = await Role.count_documents({"is_active": True})
+            total = len(await Role.find({"is_active": True}).to_list())
             
             role_list = []
             for role in roles:
@@ -79,12 +79,12 @@ class RoleHandler(RequestHandler, PermissionMixin):
         
         # 验证必填字段
         if not data.get("name"):
-            return {"code": 400, "msg": "角色名称为必填项", "data": {}}
+            return FailedResponse(msg="角色名称为必填项")
         
         # 检查角色名是否已存在
         existing_role = await Role.find_one({"name": data["name"]})
         if existing_role:
-            return {"code": 400, "msg": "角色名称已存在", "data": {}}
+            return FailedResponse(msg="角色名称已存在")
         
         # 创建角色
         current_user_id = await self.get_current_user_id()
@@ -109,11 +109,11 @@ class RoleHandler(RequestHandler, PermissionMixin):
         """更新角色"""
         role = await Role.get(role_id)
         if not role:
-            return {"code": 404, "msg": "角色不存在", "data": {}}
+            return FailedResponse(msg="角色不存在")
         
         # 系统角色不允许修改
         if role.is_system:
-            return {"code": 403, "msg": "系统角色不允许修改", "data": {}}
+            return FailedResponse(msg="系统角色不允许修改")
         
         data = json.loads(self.request.body)
         
@@ -125,7 +125,7 @@ class RoleHandler(RequestHandler, PermissionMixin):
                 "_id": {"$ne": role.id}
             })
             if existing_role:
-                return {"code": 400, "msg": "角色名称已存在", "data": {}}
+                return FailedResponse(msg="角色名称已存在")
             role.name = data["name"]
         
         if "description" in data:
@@ -149,11 +149,11 @@ class RoleHandler(RequestHandler, PermissionMixin):
         """删除角色"""
         role = await Role.get(role_id)
         if not role:
-            return {"code": 404, "msg": "角色不存在", "data": {}}
+            return FailedResponse(msg="角色不存在")
         
         # 系统角色不允许删除
         if role.is_system:
-            return {"code": 403, "msg": "系统角色不允许删除", "data": {}}
+            return FailedResponse(msg="系统角色不允许删除")
         
         # 软删除
         role.is_active = False
@@ -178,12 +178,9 @@ class PermissionHandler(RequestHandler, PermissionMixin):
             # 获取单个权限
             permission = await Permission.get(permission_id)
             if not permission:
-                return {"code": 404, "msg": "权限不存在", "data": {}}
+                return FailedResponse(msg="权限不存在")
             
             return {
-                "code": 200,
-                "msg": "获取权限成功",
-                "data": {
                     "id": str(permission.id),
                     "name": permission.name,
                     "resource": permission.resource,
@@ -192,7 +189,6 @@ class PermissionHandler(RequestHandler, PermissionMixin):
                     "is_active": permission.is_active,
                     "created_at": permission.created_at.isoformat()
                 }
-            }
         else:
             # 获取权限列表
             page = int(self.get_argument("page", 1))
@@ -200,7 +196,7 @@ class PermissionHandler(RequestHandler, PermissionMixin):
             skip = (page - 1) * limit
             
             permissions = await Permission.find({"is_active": True}).skip(skip).limit(limit).to_list()
-            total = await Permission.count_documents({"is_active": True})
+            total = len(await Permission.find({"is_active": True}).to_list())
             
             permission_list = []
             for permission in permissions:
@@ -214,9 +210,6 @@ class PermissionHandler(RequestHandler, PermissionMixin):
                 })
             
             return {
-                "code": 200,
-                "msg": "获取权限列表成功",
-                "data": {
                     "permissions": permission_list,
                     "pagination": {
                         "page": page,
@@ -225,7 +218,6 @@ class PermissionHandler(RequestHandler, PermissionMixin):
                         "pages": (total + limit - 1) // limit
                     }
                 }
-            }
     
     @try_except_async_request
     @require_permission("permission:write")
@@ -235,12 +227,12 @@ class PermissionHandler(RequestHandler, PermissionMixin):
         
         # 验证必填字段
         if not data.get("name") or not data.get("resource") or not data.get("action"):
-            return {"code": 400, "msg": "权限名称、资源和操作为必填项", "data": {}}
+            return FailedResponse(msg="权限名称、资源和操作为必填项")
         
         # 检查权限名是否已存在
         existing_permission = await Permission.find_one({"name": data["name"]})
         if existing_permission:
-            return {"code": 400, "msg": "权限名称已存在", "data": {}}
+            return FailedResponse(msg="权限名称已存在")
         
         # 创建权限
         permission = Permission(
@@ -264,7 +256,7 @@ class PermissionHandler(RequestHandler, PermissionMixin):
         """删除权限"""
         permission = await Permission.get(permission_id)
         if not permission:
-            return {"code": 404, "msg": "权限不存在", "data": {}}
+            return FailedResponse(msg="权限不存在")
         
         # 检查是否有角色在使用此权限
         roles_using_permission = await Role.find({
@@ -324,7 +316,7 @@ class UserRoleHandler(RequestHandler, PermissionMixin):
         data = json.loads(self.request.body)
         
         if not data.get("role_id"):
-            return {"code": 400, "msg": "角色ID为必填项", "data": {}}
+            return FailedResponse(msg="角色ID为必填项")
         
         current_user_id = await self.get_current_user_id()
         expires_at = None
@@ -346,7 +338,7 @@ class UserRoleHandler(RequestHandler, PermissionMixin):
                 "data": {}
             }
         else:
-            return {"code": 400, "msg": "分配角色失败", "data": {}}
+            return FailedResponse(msg="分配角色失败")
     
     @try_except_async_request
     @require_permission("user:write")
@@ -361,7 +353,7 @@ class UserRoleHandler(RequestHandler, PermissionMixin):
                 "data": {}
             }
         else:
-            return {"code": 400, "msg": "移除角色失败", "data": {}}
+            return FailedResponse(msg="移除角色失败")
 
 
 class UserPermissionHandler(RequestHandler, PermissionMixin):
@@ -375,12 +367,12 @@ class UserPermissionHandler(RequestHandler, PermissionMixin):
             # 获取指定用户的权限
             summary = await PermissionUtils.get_user_permission_summary(user_id)
             if not summary:
-                return {"code": 404, "msg": "用户不存在", "data": {}}
+                return FailedResponse(msg="用户不存在")
         else:
             # 获取当前用户的权限
             summary = await self.get_user_permission_summary()
             if not summary:
-                return {"code": 401, "msg": "未认证，请先登录", "data": {}}
+                return FailedResponse(msg="未认证，请先登录")
         
         return {
             "code": 200,
@@ -395,7 +387,7 @@ class UserPermissionHandler(RequestHandler, PermissionMixin):
         data = json.loads(self.request.body)
         
         if not data.get("permissions"):
-            return {"code": 400, "msg": "权限列表为必填项", "data": {}}
+            return FailedResponse(msg="权限列表为必填项")
         
         permissions = data["permissions"]
         if isinstance(permissions, str):
