@@ -5,15 +5,14 @@ import pandas as pd
 import efinance as ef
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv  # 新增
 
-import config.ConfigServer as Cs
+# 加载.env文件
+load_dotenv()
 
-# 初始化pro接口
-# pro = ts.pro_api('df14a3576a3afa57b5ed210b9a4e68077110dde3018c06cbba1f00c1')
-# pro = ts.pro_api('7c0f63e6190327ab6c42d10e24abbab4863d721abc5f76b67a06a020')
-configData = Cs.returnConfigData()
-toshare_token = configData["toshare_token"]
-pro = ts.pro_api(toshare_token)  # 5000积分
+# tushare token从环境变量获取
+TUSHARE_TOKEN = os.getenv('TUSHARE_TOKEN')
+pro = ts.pro_api(TUSHARE_TOKEN)  # 5000积分
 
 
 # 获取当前脚本的目录
@@ -58,7 +57,7 @@ def save_one_stock_history_data(stock='000601.SZ'):
     from utils.date_util import get_today_trade_day
     end_day = get_today_trade_day(is_format=True)
     df = pro.daily(ts_code=stock)
-    df.to_csv(f"../data/all_data/{stock}.csv", index=False)
+    df.to_csv(f"./data/all_data/{stock}.csv", index=False)
 
 
 def download_all_data(stock_list=[]):
@@ -74,7 +73,7 @@ def download_all_data(stock_list=[]):
         df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
 
         # 确保数据目录存在
-        os.makedirs('../data/all_data', exist_ok=True)
+        os.makedirs('./data/all_data', exist_ok=True)
 
 
         # 获取股票历史数据
@@ -83,7 +82,7 @@ def download_all_data(stock_list=[]):
     # all_data = ef.stock.get_quote_history(stock_list[:1])
     for code in all_data.keys():
         # 构造文件路径
-        file_path = f'../data/all_data/{code}.csv'
+        file_path = f'./data/all_data/{code}.csv'
         new_data = all_data[code]
         # 检查文件是否存在
         if os.path.exists(file_path):
@@ -113,7 +112,7 @@ if __name__ == '__main__':
     df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
 
     # 确保数据目录存在
-    os.makedirs(os.path.abspath('../data/all_data'), exist_ok=True)
+    os.makedirs(os.path.abspath('./data/all_data'), exist_ok=True)
 
     # 获取股票历史数据
     stock_list = list(map(lambda x: x[:-3], list(df['ts_code'])))
@@ -129,14 +128,12 @@ if __name__ == '__main__':
     #         code_list = stock_list[part[0]:part[1]]
     #         executor.submit(download_all_data, code_list)
     print("done")
-    while True:
-        time.sleep(1)
     # save_one_stock_history_data()
     # print("start")
     # df = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,area,industry,list_date')
     #
     # # 确保数据目录存在
-    # os.makedirs('../data/all_data', exist_ok=True)
+    # os.makedirs('./data/all_data', exist_ok=True)
     #
     # # 获取当前日期
     # now = datetime.now()
