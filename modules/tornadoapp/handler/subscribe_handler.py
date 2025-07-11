@@ -15,4 +15,4 @@ class SubscribeHandler(RequestHandler):
         else:
             user.subscription_expire_at = now + timedelta(days=30*months)
         await user.save()
-        self.write({"code": 200, "msg": "订阅开通/续费成功", "expire_at": user.subscription_expire_at.isoformat()}) 
+        return {"expire_at": user.subscription_expire_at.isoformat()} 

@@ -22,6 +22,7 @@ class DataHandler(RequestHandler, PermissionMixin):
                 "content": f"这是数据{data_id}的内容",
                 "created_by": await self.get_current_user_id()
             }
+            return data
         else:
             # 获取数据列表
             data = [
@@ -29,12 +30,7 @@ class DataHandler(RequestHandler, PermissionMixin):
                 {"id": "2", "name": "数据2", "content": "数据2内容"},
                 {"id": "3", "name": "数据3", "content": "数据3内容"}
             ]
-        
-        return {
-            "code": 200,
-            "msg": "数据获取成功",
-            "data": data
-        }
+            return data
     
     @try_except_async_request
     @require_permission("data:write")
@@ -53,11 +49,7 @@ class DataHandler(RequestHandler, PermissionMixin):
             "created_at": "2024-01-01T00:00:00Z"
         }
         
-        return {
-            "code": 201,
-            "msg": "数据创建成功",
-            "data": new_data
-        }
+        return new_data
     
     @try_except_async_request
     @require_permission("data:write")
@@ -73,21 +65,13 @@ class DataHandler(RequestHandler, PermissionMixin):
             "updated_at": "2024-01-01T00:00:00Z"
         }
         
-        return {
-            "code": 200,
-            "msg": "数据更新成功",
-            "data": updated_data
-        }
+        return updated_data
     
     @try_except_async_request
     @require_permission("data:delete")
     async def delete(self, data_id):
         """删除数据 - 需要data:delete权限"""
-        return {
-            "code": 200,
-            "msg": f"数据{data_id}删除成功",
-            "data": {"deleted_id": data_id}
-        }
+        return {"deleted_id": data_id}
 
 
 class SystemHandler(RequestHandler, PermissionMixin):
@@ -105,11 +89,7 @@ class SystemHandler(RequestHandler, PermissionMixin):
             "cpu_usage": "15%"
         }
         
-        return {
-            "code": 200,
-            "msg": "系统信息获取成功",
-            "data": system_info
-        }
+        return system_info
     
     @try_except_async_request
     @require_admin()
@@ -124,11 +104,7 @@ class SystemHandler(RequestHandler, PermissionMixin):
             "updated_at": "2024-01-01T00:00:00Z"
         }
         
-        return {
-            "code": 200,
-            "msg": "系统配置更新成功",
-            "data": config
-        }
+        return config
 
 
 class UserManagementHandler(RequestHandler, PermissionMixin):
@@ -145,17 +121,13 @@ class UserManagementHandler(RequestHandler, PermissionMixin):
                 "email": f"user{user_id}@example.com",
                 "status": "active"
             }
+            return user_info
         else:
             user_info = [
                 {"id": "1", "username": "user1", "email": "user1@example.com", "status": "active"},
                 {"id": "2", "username": "user2", "email": "user2@example.com", "status": "inactive"}
             ]
-        
-        return {
-            "code": 200,
-            "msg": "用户信息获取成功",
-            "data": user_info
-        }
+            return user_info
     
     @try_except_async_request
     @require_permissions(["user:write", "user:admin"], require_all=True)
@@ -174,11 +146,7 @@ class UserManagementHandler(RequestHandler, PermissionMixin):
             "created_by": await self.get_current_user_id()
         }
         
-        return {
-            "code": 201,
-            "msg": "用户创建成功",
-            "data": new_user
-        }
+        return new_user
 
 
 class RoleBasedHandler(RequestHandler, PermissionMixin):
@@ -198,11 +166,7 @@ class RoleBasedHandler(RequestHandler, PermissionMixin):
             "admin_actions": ["user_management", "system_config", "data_export"]
         }
         
-        return {
-            "code": 200,
-            "msg": "管理员面板数据获取成功",
-            "data": admin_data
-        }
+        return admin_data
     
     @try_except_async_request
     @require_roles(["admin", "user_manager"], require_all=False)
@@ -218,11 +182,7 @@ class RoleBasedHandler(RequestHandler, PermissionMixin):
             "timestamp": "2024-01-01T00:00:00Z"
         }
         
-        return {
-            "code": 200,
-            "msg": f"操作{action}执行成功",
-            "data": result
-        }
+        return result
 
 
 class MixedPermissionHandler(RequestHandler, PermissionMixin):
@@ -235,7 +195,7 @@ class MixedPermissionHandler(RequestHandler, PermissionMixin):
         permission_summary = await self.get_user_permission_summary()
         
         if not permission_summary:
-            return {"code": 401, "msg": "认证失败", "data": {}}
+            return FailedResponse(msg="认证失败")
         
         # 动态检查权限
         can_read_data = await self.check_permission("data:read")
@@ -257,11 +217,7 @@ class MixedPermissionHandler(RequestHandler, PermissionMixin):
             }
         }
         
-        return {
-            "code": 200,
-            "msg": "权限信息获取成功",
-            "data": response_data
-        }
+        return response_data
     
     @try_except_async_request
     async def post(self):
@@ -283,11 +239,7 @@ class MixedPermissionHandler(RequestHandler, PermissionMixin):
             return FailedResponse(msg=f"没有执行{action}的权限")
         
         return {
-            "code": 200,
-            "msg": f"操作{action}执行成功",
-            "data": {
-                "action": action,
-                "executed_by": await self.get_current_user_id(),
-                "permission_granted": has_permission
-            }
+            "action": action,
+            "executed_by": await self.get_current_user_id(),
+            "permission_granted": has_permission
         } 

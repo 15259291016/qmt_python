@@ -40,11 +40,7 @@ class SuperAdminHandler(RequestHandler, PermissionMixin):
                 "last_login": admin.last_login.isoformat() if admin.last_login else None
             })
         
-        return {
-            "code": 200,
-            "msg": "获取超级管理员列表成功",
-            "data": {"super_admins": admin_list}
-        }
+        return {"super_admins": admin_list}
     
     @try_except_async_request
     @require_permission("user:admin")
@@ -78,11 +74,7 @@ class SuperAdminHandler(RequestHandler, PermissionMixin):
         user.updated_at = datetime.utcnow()
         await user.save()
         
-        return {
-            "code": 200,
-            "msg": "设置超级管理员成功",
-            "data": {"user_id": str(user.id)}
-        }
+        return {"user_id": str(user.id)}
     
     @try_except_async_request
     @require_permission("user:admin")
@@ -111,8 +103,4 @@ class SuperAdminHandler(RequestHandler, PermissionMixin):
         user.updated_at = datetime.utcnow()
         await user.save()
         
-        return {
-            "code": 200,
-            "msg": "取消超级管理员权限成功",
-            "data": {"user_id": str(user.id)}
-        } 
+        return {"user_id": str(user.id)} 

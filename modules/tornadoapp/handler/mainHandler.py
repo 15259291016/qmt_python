@@ -24,15 +24,16 @@ class MainHandler(BaseHandler):
     async def get(self):
         res = await DemoModel.find().to_list()
         res_dict = [item.to_dict() for item in res]
-        # self.write(json.dumps(res_dict, ensure_ascii=False))
         return res_dict
 
+    @try_except_async_request
     async def post(self):
         data = json.loads(self.request.body.decode("utf-8"))
         demo = DemoModel(**data)
         await demo.save()
         return True
 
+    @try_except_async_request
     async def put(self):
         data = json.loads(self.request.body.decode("utf-8"))
         demo = await DemoModel.find_one(DemoModel.id == data["id"])
@@ -42,10 +43,11 @@ class MainHandler(BaseHandler):
         demo.phone = data["phone"]
         demo.address = data["address"]
         await demo.save()
-        self.write(True)
+        return True
 
+    @try_except_async_request
     async def delete(self):
         data = json.loads(self.request.body.decode("utf-8"))
         demo = await DemoModel.find_one(DemoModel.id == data["id"])
         await demo.delete()
-        self.write(True)
+        return True

@@ -23,30 +23,24 @@ class UserHandler(RequestHandler, PermissionMixin):
             user = await User.get(user_id)
             if not user:
                 return FailedResponse(msg="用户不存在")
-            
             return {
-                "code": 200,
-                "msg": "获取用户成功",
-                "data": {
-                    "id": str(user.id),
-                    "username": user.username,
-                    "email": user.email,
-                    "full_name": user.full_name,
-                    "is_active": user.is_active,
-                    "is_admin": user.is_admin,
-                    "is_super_admin": user.is_super_admin,
-                    "created_at": user.created_at.isoformat(),
-                    "updated_at": user.updated_at.isoformat(),
-                    "last_login": user.last_login.isoformat() if user.last_login else None,
-                    "subscription_expire_at": user.subscription_expire_at.isoformat() if user.subscription_expire_at else None
-                }
+                "id": str(user.id),
+                "username": user.username,
+                "email": user.email,
+                "full_name": user.full_name,
+                "is_active": user.is_active,
+                "is_admin": user.is_admin,
+                "is_super_admin": user.is_super_admin,
+                "created_at": user.created_at.isoformat(),
+                "updated_at": user.updated_at.isoformat(),
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+                "subscription_expire_at": user.subscription_expire_at.isoformat() if user.subscription_expire_at else None
             }
         else:
             # 获取用户列表
             page = int(self.get_argument("page", 1))
             limit = int(self.get_argument("limit", 10))
             search = self.get_argument("search", "")
-            
             # 构建查询条件
             query = {}
             if search:
@@ -55,13 +49,10 @@ class UserHandler(RequestHandler, PermissionMixin):
                     {"email": {"$regex": search, "$options": "i"}},
                     {"full_name": {"$regex": search, "$options": "i"}}
                 ]
-            
             # 计算总数
             total = len(await User.find(query).to_list())
-            
             # 获取用户列表
             users = await User.find(query).skip((page - 1) * limit).limit(limit).to_list()
-            
             user_list = []
             for user in users:
                 # 获取用户的角色信息
@@ -75,7 +66,6 @@ class UserHandler(RequestHandler, PermissionMixin):
                             "name": role.name,
                             "description": role.description
                         })
-                
                 user_list.append({
                     "id": str(user.id),
                     "username": user.username,
@@ -89,37 +79,32 @@ class UserHandler(RequestHandler, PermissionMixin):
                     "updated_at": user.updated_at.isoformat(),
                     "last_login": user.last_login.isoformat() if user.last_login else None
                 })
-            
             return {
-                    "users": user_list,
-                    "pagination": {
-                        "page": page,
-                        "limit": limit,
-                        "total": total,
-                        "pages": (total + limit - 1) // limit
-                    }
+                "users": user_list,
+                "pagination": {
+                    "page": page,
+                    "limit": limit,
+                    "total": total,
+                    "pages": (total + limit - 1) // limit
                 }
+            }
     
     @try_except_async_request
     @require_permission("user:write")
     async def post(self):
         """创建用户"""
         data = json.loads(self.request.body)
-        
         # 验证必填字段
         if not data.get("username") or not data.get("email") or not data.get("password"):
             return FailedResponse(msg="用户名、邮箱和密码为必填项")
-        
         # 检查用户名是否已存在
         existing_user = await User.find_one({"username": data["username"]})
         if existing_user:
             return FailedResponse(msg="用户名已存在")
-        
         # 检查邮箱是否已存在
         existing_email = await User.find_one({"email": data["email"]})
         if existing_email:
             return FailedResponse(msg="邮箱已存在")
-        
         # 创建用户
         user = User(
             username=data["username"],
@@ -129,37 +114,26 @@ class UserHandler(RequestHandler, PermissionMixin):
             is_active=data.get("is_active", True),
             is_admin=data.get("is_admin", False)
         )
-        
         await user.insert()
-        
-        return {
-            "code": 201,
-            "msg": "用户创建成功",
-            "data": {"user_id": str(user.id)}
-        }
+        return {"user_id": str(user.id)}
     
     @try_except_async_request
     @require_permission("user:write")
     async def put(self, user_id):
         """更新用户信息"""
         data = json.loads(self.request.body)
-        
         user = await User.get(user_id)
         if not user:
             return FailedResponse(msg="用户不存在")
-        
         # 检查当前用户权限
         current_user_id = await self.get_current_user_id()
         current_user = await User.get(current_user_id)
-        
         # 只有超级管理员可以修改超级管理员状态
         if "is_super_admin" in data and not current_user.is_super_admin:
             return FailedResponse(msg="只有超级管理员可以修改超级管理员状态")
-        
         # 普通管理员不能修改超级管理员的其他信息
         if not current_user.is_super_admin and user.is_super_admin:
             return FailedResponse(msg="普通管理员不能修改超级管理员信息")
-        
         # 更新用户信息
         update_data = {}
         if "email" in data:
@@ -168,28 +142,17 @@ class UserHandler(RequestHandler, PermissionMixin):
             if existing_user:
                 return FailedResponse(msg="邮箱已被使用")
             update_data["email"] = data["email"]
-        
         if "full_name" in data:
             update_data["full_name"] = data["full_name"]
-        
         if "is_active" in data:
             update_data["is_active"] = data["is_active"]
-        
         if "is_admin" in data:
             update_data["is_admin"] = data["is_admin"]
-        
         if "is_super_admin" in data and current_user.is_super_admin:
             update_data["is_super_admin"] = data["is_super_admin"]
-        
         update_data["updated_at"] = datetime.utcnow()
-        
         await user.update({"$set": update_data})
-        
-        return {
-            "code": 200,
-            "msg": "用户更新成功",
-            "data": {"user_id": str(user.id)}
-        }
+        return {"user_id": str(user.id)}
     
     @try_except_async_request
     @require_permission("user:delete")
@@ -198,17 +161,8 @@ class UserHandler(RequestHandler, PermissionMixin):
         user = await User.get(user_id)
         if not user:
             return FailedResponse(msg="用户不存在")
-        
-        # 软删除
-        user.is_active = False
-        user.updated_at = datetime.utcnow()
-        await user.save()
-        
-        return {
-            "code": 200,
-            "msg": "用户删除成功",
-            "data": {}
-        }
+        await user.delete()
+        return {"user_id": user_id}
 
 
 class UserRoleManagementHandler(RequestHandler, PermissionMixin):
@@ -240,11 +194,7 @@ class UserRoleManagementHandler(RequestHandler, PermissionMixin):
                     "expires_at": user_role.expires_at.isoformat() if user_role.expires_at else None
                 })
         
-        return {
-            "code": 200,
-            "msg": "获取用户角色成功",
-            "data": {"roles": role_list}
-        }
+        return {"roles": role_list}
     
     @try_except_async_request
     @require_permission("user:write")
@@ -290,11 +240,7 @@ class UserRoleManagementHandler(RequestHandler, PermissionMixin):
         
         await user_role.insert()
         
-        return {
-            "code": 200,
-            "msg": "角色分配成功",
-            "data": {}
-        }
+        return {}
     
     @try_except_async_request
     @require_permission("user:write")
@@ -320,11 +266,7 @@ class UserRoleManagementHandler(RequestHandler, PermissionMixin):
         user_role.updated_at = datetime.utcnow()
         await user_role.save()
         
-        return {
-            "code": 200,
-            "msg": "角色移除成功",
-            "data": {}
-        }
+        return {}
 
 
 class UserPermissionHandler(RequestHandler, PermissionMixin):
@@ -380,12 +322,8 @@ class UserPermissionHandler(RequestHandler, PermissionMixin):
                 })
         
         return {
-            "code": 200,
-            "msg": "获取用户权限成功",
-            "data": {
-                "roles": role_list,
-                "permissions": permission_list
-            }
+            "roles": role_list,
+            "permissions": permission_list
         }
     
     @try_except_async_request
@@ -420,11 +358,7 @@ class UserPermissionHandler(RequestHandler, PermissionMixin):
         for perm in permissions:
             result[perm] = perm in user_permissions
         
-        return {
-            "code": 200,
-            "msg": "权限检查完成",
-            "data": {"permissions": result}
-        }
+        return {"permissions": result}
 
 
 class UserStatsHandler(RequestHandler, PermissionMixin):
@@ -454,14 +388,10 @@ class UserStatsHandler(RequestHandler, PermissionMixin):
         }).to_list())
         
         return {
-            "code": 200,
-            "msg": "获取用户统计成功",
-            "data": {
-                "total_users": total_users,
-                "admin_count": admin_count,
-                "today_users": today_users,
-                "active_users": active_users
-            }
+            "total_users": total_users,
+            "admin_count": admin_count,
+            "today_users": today_users,
+            "active_users": active_users
         } 
 
 
