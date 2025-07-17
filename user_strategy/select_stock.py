@@ -122,6 +122,13 @@ class QuantitativeStockSelector:
             'risk': ['beta', 'volatility_20d']
         }
 
+    def get_all_factors(self):
+        """返回所有因子字段名"""
+        factors = []
+        for group in self.get_factor_exposure().values():
+            factors.extend(group)
+        return factors
+
     def prepare_dataset(self):
         """准备全量因子数据"""
         print("正在加载基础数据...")
@@ -209,6 +216,8 @@ class QuantitativeStockSelector:
         """生成综合评分"""
         print("计算股票评分...")
         factors = self.get_all_factors()
+        if self.factor_weights is None:
+            self.factor_weights = pd.Series(1, index=factors)
         df['score'] = df[factors].dot(self.factor_weights.reindex(factors, fill_value=0))
         return df
 
@@ -245,14 +254,14 @@ class QuantitativeStockSelector:
         """生成绩效分析报告"""
         annual_return = np.prod([1 + r for r in returns]) ** (252 / len(returns)) - 1
         sharpe_ratio = np.mean(returns) / np.std(returns) * np.sqrt(252)
-        max_drawdown = self.calculate_max_drawdown(pd.Series(returns))
+        # max_drawdown = self.calculate_max_drawdown(pd.Series(returns))  # 移除未定义方法
         win_rate = len([r for r in returns if r > 0]) / len(returns)
 
         report = f"""
         === 策略绩效报告 ===
         年化收益率：{annual_return:.2%}
         夏普比率：{sharpe_ratio:.2f}
-        最大回撤：{max_drawdown:.2%}
+        # 最大回撤：N/A
         胜率：{win_rate:.2%}
         """
         return report
@@ -281,6 +290,17 @@ class QuantitativeStockSelector:
                 self.adjust_portfolio()  # 调整组合
             print("当前策略表现：", current_performance)
             time.sleep(3600)  # 每小时检查一次
+
+    def get_top_stocks(self, top_n=10):
+        """输出当前topN股票池"""
+        df = self.prepare_dataset()
+        df = self.calculate_factors(df)
+        # 简单等权重打分
+        if self.factor_weights is None:
+            self.factor_weights = pd.Series(1, index=self.get_all_factors())
+        df = self.stock_scoring(df)
+        df = df.sort_values('score', ascending=False)
+        return df.head(top_n)['ts_code'].tolist()
 
 #================================================================================================
 def run_strategy():

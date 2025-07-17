@@ -206,14 +206,19 @@ class AdvancedStockSellingStrategy:
         self._calculate_indicators(rsi_window, macd_fast, macd_slow, macd_signal)
         self._generate_signals(rsi_overbought, rsi_oversold, stop_loss_pct, take_profit_pct)
         positions = self.xt_trader.query_stock_positions(self.acc)
+        position_dict = {p.stock_code: p for p in positions} if positions else {}
         if positions:
             for position in positions:
                 print(
-                    f"{position.stock_code}, 仓: {position.volume}, 本: {position.avg_price}, 总:{self.data.iloc[-1]['Close'] * position.volume - position.avg_price * position.volume}")
+                    f"{position.stock_code}, 仓: {position.volume}, 可用: {getattr(position, 'enable_amount', 0)}, 本: {position.avg_price}, 总:{self.data.iloc[-1]['Close'] * position.volume - position.avg_price * position.volume}")
                 if self.data.iloc[-1]['Signal'] == -1:
-                    sell_volume = min(100000, int(position.volume))
-                    # 卖出通过OMS
-                    self.order_manager.create_order(position.stock_code, "卖", float(self.data.iloc[-1]['Close']), sell_volume, self.acc)
+                    # 卖出前校验可用持仓
+                    enable_amount = getattr(position, 'enable_amount', 0)
+                    sell_volume = min(100000, int(enable_amount))
+                    if enable_amount > 0:
+                        self.order_manager.create_order(position.stock_code, "卖", float(self.data.iloc[-1]['Close']), sell_volume, self.acc)
+                    else:
+                        print(f"无可用持仓，跳过卖出: {position.stock_code}")
             position = self.data.iloc[-1]['Close'] * position.volume - position.avg_price * position.volume
         else:
             position = self.initial_capital
@@ -228,7 +233,6 @@ class AdvancedStockSellingStrategy:
         capital -= position * self.data.iloc[-1]['Close']
         if self.data.iloc[-1]['Signal'] == 1:
             buy_volume = int(self.initial_capital * 0.1 / (self.data.iloc[-1]['Close'] * 100)) * 100
-            # 买入通过OMS
             self.order_manager.create_order(self.ticker, "买", float(self.data.iloc[-1]['Close']), buy_volume, self.acc)
         portfolio_value = capital + position * self.data.iloc[-1]['Close']
         portfolio_values.append(portfolio_value)
@@ -295,9 +299,7 @@ def run_strategy(ticker, acc, xt_trader, order_manager):
     # 优化参数
     optimized_params = strategy.optimize_parameters()
     print("Optimized Parameters:", optimized_params)
-
     xtdata.subscribe_whole_quote([ticker], callback=on_tick)
-
     # 运行优化后的策略
     try:
         final_value, portfolio_values = strategy.run_optimized_strategy()
@@ -305,17 +307,7 @@ def run_strategy(ticker, acc, xt_trader, order_manager):
     except Exception as e:
         print(f"策略运行异常: {e}")
         return
-
-    # 示例：通过OMS下单（用最新收盘价）
-    try:
-        last_close = float(strategy.data['Close'].iloc[-1])
-        price = last_close
-        quantity = 100  # 示例数量
-        # 卖出下单
-        order = order_manager.create_order(ticker, "卖", price, quantity, acc)
-        print(f"订单已创建: {order}")
-    except Exception as e:
-        print(f"OMS下单异常: {e}")
+    # 不再对ticker直接create_order卖出，防止无持仓自动卖出
 
 
 # 卖出策略示例使用

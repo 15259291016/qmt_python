@@ -6,6 +6,7 @@ import uuid
 from modules.tornadoapp.risk.risk_manager import RiskManager
 from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
 from modules.tornadoapp.audit.audit_logger import AuditLogger
+from xtquant import xtconstant
 
 class OrderManager:
     def __init__(self, xt_trader, risk_manager=None, compliance_manager=None, audit_logger=None):
@@ -40,15 +41,26 @@ class OrderManager:
         return order
 
     def _send_order_to_broker(self, order):
+        account = order.account
         if order.side == "买":
-            broker_order_id = self.xt_trader.buy(order.symbol, order.price, order.quantity, user_tag=order.order_id)
+            direction = xtconstant.STOCK_BUY
         elif order.side == "卖":
-            broker_order_id = self.xt_trader.sell(order.symbol, order.price, order.quantity, user_tag=order.order_id)
+            direction = xtconstant.STOCK_SELL
         else:
-            broker_order_id = None
-        if broker_order_id:
-            with self.lock:
-                self.broker_order_map[broker_order_id] = order.order_id
+            direction = None
+        if direction is not None:
+            broker_order_id = self.xt_trader.order_stock_async(
+                account,
+                order.symbol,
+                direction,
+                order.quantity,
+                xtconstant.LATEST_PRICE,
+                order.price,
+                order.order_id
+            )
+            if broker_order_id:
+                with self.lock:
+                    self.broker_order_map[broker_order_id] = order.order_id
 
     def update_order_status(self, broker_order_id, broker_status, filled_quantity=0, avg_fill_price=0.0, user="system"):
         with self.lock:
