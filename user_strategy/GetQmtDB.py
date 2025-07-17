@@ -200,7 +200,7 @@ class MyXtQuantTraderCallback:
 # 示例使用
 if __name__ == "__main__":
     # 配置参数
-    qmt_path = r"D:\国金QMT交易端模拟\userdata_mini"
+    qmt_path = r"D:\国金证券QMT交易端\userdata_mini"
     account = "55005056"  # 替换为国金证券账号
 
     # 初始化数据接口

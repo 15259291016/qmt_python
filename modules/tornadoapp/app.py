@@ -37,6 +37,9 @@ from modules.tornadoapp.handler.business_handler import (
 from modules.tornadoapp.handler.subscribe_handler import SubscribeHandler
 from modules.tornadoapp.middleware.middleware_manager import create_app_with_middlewares
 from modules.tornadoapp.handler.super_admin_handler import SuperAdminHandler
+from modules.tornadoapp.risk.risk_api import RiskConfigHandler, BlacklistHandler
+from modules.tornadoapp.compliance.compliance_api import ComplianceLogHandler, ComplianceExportHandler, ComplianceRuleHandler
+from modules.tornadoapp.audit.audit_api import AuditLogHandler, AuditExportHandler
 
 
 # 定义路由
@@ -79,6 +82,13 @@ routes = [
     (r"/api/system", SystemHandler),
     (r"/api/admin", RoleBasedHandler),
     (r"/api/mixed-permissions", MixedPermissionHandler),
+    (r"/api/risk/config", RiskConfigHandler),
+    (r"/api/risk/blacklist", BlacklistHandler),
+    (r"/api/compliance/logs", ComplianceLogHandler),
+    (r"/api/compliance/export", ComplianceExportHandler),
+    (r"/api/compliance/rule", ComplianceRuleHandler),
+    (r"/api/audit/logs", AuditLogHandler),
+    (r"/api/audit/export", AuditExportHandler),
 ]
 
 # 创建带中间件的应用

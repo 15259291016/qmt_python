@@ -22,12 +22,10 @@ def returnConfigData():
     """
     configData = {
         "QMT_PATH": [
-            os.getenv("QMT_PATH_1", "D:\\国金QMT交易端模拟\\userdata_mini"),
-            os.getenv("QMT_PATH_2", "H:\\Program Files (x86)\\国金证券QMT交易端\\userdata_mini")
+            os.getenv("QMT_PATH_1", "D:\\国金证券QMT交易端\\userdata_mini"),
         ],
         "account": [
-            os.getenv("ACCOUNT_1", "55005056"),
-            os.getenv("ACCOUNT_2", "8881667160")
+            os.getenv("ACCOUNT_1", "8881667160")
         ],
         "toshare_token": os.getenv("TUSHARE_TOKEN", "gx03013e909f633ecb66722df66b360f070426613316ebf06ecd3482")
     }

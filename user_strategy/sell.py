@@ -68,7 +68,7 @@ from utils.callback import MyXtQuantTraderCallback
 
 
 class AdvancedStockSellingStrategy:
-    def __init__(self, ticker, acc, xt_trader, initial_capital=100000, risk_per_trade=0.02, max_drawdown=0.10):
+    def __init__(self, ticker, acc, xt_trader, order_manager, initial_capital=100000, risk_per_trade=0.02, max_drawdown=0.10):
         """
         初始化策略参数
         :param ticker: 股票代码
@@ -84,28 +84,38 @@ class AdvancedStockSellingStrategy:
         self.optimized_params = None
         self.xt_trader = xt_trader  # xtquant 交易接口
         self.acc = acc  # xtquant 交易接口
+        self.order_manager = order_manager  # OMS订单管理
 
     def _get_realtime_data(self, data):
-        data = pd.DataFrame(data[list(data.keys())[0]]).rename(columns={"lastPrice": "Close"})
+        df = pd.DataFrame(data[list(data.keys())[0]]).rename(columns={"lastPrice": "Close"})
+        if 'Close' in df.columns:
+            df = df[['Close']]
+        # 保证self.data为DataFrame
+        if not isinstance(self.data, pd.DataFrame):
+            self.data = pd.DataFrame({"Close": []})
         if self.data.empty:
-            self.data = data
+            self.data = df
         else:
-            self.data = pd.concat([self.data, data.head(1)], ignore_index=True)
+            self.data = pd.concat([self.data, df.head(1)], ignore_index=True)
+        # 强制Close列为Series类型
+        if 'Close' in self.data.columns and not isinstance(self.data['Close'], pd.Series):
+            self.data['Close'] = pd.Series(self.data['Close'])
 
     def _get_historical_data(self):
         """获取历史股票数据"""
-        data = pd.read_csv(f"../data/all_data/{self.ticker[:-3]}.csv")
+        data = pd.read_csv(f"./data/all_data/{self.ticker[:-3]}.csv")
         data = data.rename(columns={"收盘": "Close"})
         return data
 
     def _calculate_indicators(self, rsi_window=14, macd_fast=12, macd_slow=26, macd_signal=9):
         """计算RSI和MACD指标"""
         # 计算RSI
-        rsi_indicator = RSIIndicator(self.data['Close'], window=rsi_window)
+        close_series = self.data['Close'] if 'Close' in self.data else pd.Series(dtype=float)
+        rsi_indicator = RSIIndicator(close_series, window=rsi_window)
         self.data['RSI'] = rsi_indicator.rsi()
 
         # 计算MACD
-        macd_indicator = MACD(self.data['Close'], window_slow=macd_slow, window_fast=macd_fast, window_sign=macd_signal)
+        macd_indicator = MACD(close_series, window_slow=macd_slow, window_fast=macd_fast, window_sign=macd_signal)
         self.data['MACD'] = macd_indicator.macd()
         self.data['MACD_Signal'] = macd_indicator.macd_signal()
         self.data['MACD_Hist'] = macd_indicator.macd_diff()
@@ -122,20 +132,23 @@ class AdvancedStockSellingStrategy:
         # print(f"RSI超卖信号（买入）:self.data['RSI'] < rsi_oversold：{self.data.loc[self.data['RSI'] < rsi_oversold, 'Signal']}")
 
         # MACD死叉信号（卖出）
-        self.data.loc[(self.data['MACD'] < self.data['MACD_Signal']) &
-                      (self.data['MACD'].shift(1) >= self.data['MACD_Signal'].shift(1)), 'Signal'] = -1
+        if isinstance(self.data['MACD'], pd.Series) and isinstance(self.data['MACD_Signal'], pd.Series):
+            self.data.loc[(self.data['MACD'] < self.data['MACD_Signal']) &
+                          (self.data['MACD'].shift(1) >= self.data['MACD_Signal'].shift(1)), 'Signal'] = -1
         # print(f"MACD死叉信号（卖出）:{self.data.loc[(self.data['MACD'] < self.data['MACD_Signal']) & (self.data['MACD'].shift(1) >= self.data['MACD_Signal'].shift(1)), 'Signal']}")
 
         # 止损信号
-        self.data['Max_Price'] = self.data['Close'].cummax()
-        self.data['Stop_Loss'] = self.data['Max_Price'] * (1 - stop_loss_pct)
-        self.data.loc[self.data['Close'] < self.data['Stop_Loss'], 'Signal'] = -1
+        if isinstance(self.data['Close'], pd.Series):
+            self.data['Max_Price'] = self.data['Close'].cummax()
+            self.data['Stop_Loss'] = self.data['Max_Price'] * (1 - stop_loss_pct)
+            self.data.loc[self.data['Close'] < self.data['Stop_Loss'], 'Signal'] = -1
         # print(f"止损信号:{self.data.loc[self.data['Close'] < self.data['Stop_Loss'], 'Signal']}")
 
         # 止盈信号
-        self.data['Min_Price'] = self.data['Close'].cummin()
-        self.data['Take_Profit'] = self.data['Min_Price'] * (1 + take_profit_pct)
-        self.data.loc[self.data['Close'] > self.data['Take_Profit'], 'Signal'] = -1
+        if isinstance(self.data['Close'], pd.Series):
+            self.data['Min_Price'] = self.data['Close'].cummin()
+            self.data['Take_Profit'] = self.data['Min_Price'] * (1 + take_profit_pct)
+            self.data.loc[self.data['Close'] > self.data['Take_Profit'], 'Signal'] = -1
         # print(f"止盈信号:{self.data.loc[self.data['Close'] > self.data['Take_Profit'], 'Signal']}")
         # print(self.data['Signal'])
 
@@ -194,45 +207,32 @@ class AdvancedStockSellingStrategy:
         self._generate_signals(rsi_overbought, rsi_oversold, stop_loss_pct, take_profit_pct)
         positions = self.xt_trader.query_stock_positions(self.acc)
         if positions:
-            # print("持仓股票列表：")
             for position in positions:
                 print(
                     f"{position.stock_code}, 仓: {position.volume}, 本: {position.avg_price}, 总:{self.data.iloc[-1]['Close'] * position.volume - position.avg_price * position.volume}")
                 if self.data.iloc[-1]['Signal'] == -1:
-                    if position.volume > 100000:
-                        sell_volume = 100000
-                    else:
-                        sell_volume = int(position.volume)
-                    # 卖出
-                    self.xt_trader.order_stock_async(self.acc, position.stock_code, xtconstant.STOCK_SELL, sell_volume, xtconstant.LATEST_PRICE, self.data.iloc[-1]['Close'], '打板策略')
-
+                    sell_volume = min(100000, int(position.volume))
+                    # 卖出通过OMS
+                    self.order_manager.create_order(position.stock_code, "卖", float(self.data.iloc[-1]['Close']), sell_volume, self.acc)
             position = self.data.iloc[-1]['Close'] * position.volume - position.avg_price * position.volume
         else:
             position = self.initial_capital
             print("当前没有持仓股票")
         capital = self.initial_capital
-
         portfolio_values = []
         max_portfolio_value = self.initial_capital
-        # 动态调整风险比例
         self.risk_per_trade = self._dynamic_risk_adjustment(capital + position * self.data.iloc[-1]['Close'],
                                                             max_portfolio_value)
         stop_loss = self.data.iloc[-1]['Close'] * (1 - stop_loss_pct)
         position = self._calculate_position_size(self.data.iloc[-1]['Close'], stop_loss)
         capital -= position * self.data.iloc[-1]['Close']
         if self.data.iloc[-1]['Signal'] == 1:
-            # 买入
             buy_volume = int(self.initial_capital * 0.1 / (self.data.iloc[-1]['Close'] * 100)) * 100
-            self.xt_trader.order_stock_async(self.acc, self.ticker, xtconstant.STOCK_BUY, buy_volume,
-                                             xtconstant.LATEST_PRICE, self.data.iloc[-1]['Close'], '打板策略')
-        # else:
-        #     self.xt_trader.order_stock_async(self.acc, "000601.SZ", xtconstant.STOCK_BUY, 100, xtconstant.LATEST_PRICE, self.data.iloc[-1]['Close'], '打板策略')
-        # 更新投资组合价值和最大回撤
+            # 买入通过OMS
+            self.order_manager.create_order(self.ticker, "买", float(self.data.iloc[-1]['Close']), buy_volume, self.acc)
         portfolio_value = capital + position * self.data.iloc[-1]['Close']
         portfolio_values.append(portfolio_value)
         max_portfolio_value = max(max_portfolio_value, portfolio_value)
-
-        # 计算最终收益
         final_value = capital + position * self.data.iloc[-1]['Close']
         return final_value, portfolio_values
 
@@ -284,18 +284,38 @@ def on_tick(data):
     # strategy.execute_trade(signal=-1, price=160, quantity=100)  # 卖出 100 股
 
 
-def run_strategy(stock_code, acc, xt_trader):
+def run_strategy(ticker, acc, xt_trader, order_manager):
+    """示例：通过OMS下单"""
     xtdata.enable_hello = False
     global strategy
     asset = xt_trader.query_stock_asset(acc)
     print(f"现金:{asset.cash}")
-    strategy = AdvancedStockSellingStrategy(stock_code, acc, xt_trader, initial_capital=asset.cash, risk_per_trade=0.02,
+    strategy = AdvancedStockSellingStrategy(ticker, acc, xt_trader, order_manager, initial_capital=asset.cash, risk_per_trade=0.02,
                                             max_drawdown=0.10)
     # 优化参数
     optimized_params = strategy.optimize_parameters()
     print("Optimized Parameters:", optimized_params)
 
-    xtdata.subscribe_whole_quote([stock_code], callback=on_tick)
+    xtdata.subscribe_whole_quote([ticker], callback=on_tick)
+
+    # 运行优化后的策略
+    try:
+        final_value, portfolio_values = strategy.run_optimized_strategy()
+        print("Final Portfolio Value:", final_value)
+    except Exception as e:
+        print(f"策略运行异常: {e}")
+        return
+
+    # 示例：通过OMS下单（用最新收盘价）
+    try:
+        last_close = float(strategy.data['Close'].iloc[-1])
+        price = last_close
+        quantity = 100  # 示例数量
+        # 卖出下单
+        order = order_manager.create_order(ticker, "卖", price, quantity, acc)
+        print(f"订单已创建: {order}")
+    except Exception as e:
+        print(f"OMS下单异常: {e}")
 
 
 # 卖出策略示例使用
@@ -307,14 +327,14 @@ if __name__ == "__main__":
     account = configData["account"][0]
     # 连接 xtquant 交易接口
     acc = StockAccount(account, 'STOCK')
-    # 初始化策略
-    # strategy = AdvancedStockSellingStrategy("比亚迪", initial_capital=100000, risk_per_trade=0.02, max_drawdown=0.10)
-    strategy = AdvancedStockSellingStrategy("000601", acc, initial_capital=100000, risk_per_trade=0.02,
-                                            max_drawdown=0.10)
-
     session_id = int(time.time())
     xt_trader = XtQuantTrader(path, session_id)
-    strategy.connect_xtquant(acc, xt_trader)
+    # 集成OMS订单管理
+    from modules.tornadoapp.oms.order_manager import OrderManager
+    order_manager = OrderManager(xt_trader)
+    # 初始化策略
+    strategy = AdvancedStockSellingStrategy("000601", acc, xt_trader, order_manager, initial_capital=100000, risk_per_trade=0.02,
+                                            max_drawdown=0.10)
     data = {'605133.SH': {'time': 1740970227000,
                           'lastPrice': 26.71, 'open': 26.52, 'high': 26.84, 'low': 26.09,
                           'lastClose': 26.19, 'amount': 48391700.0, 'volume': 18228, 'pvolume': 1822800,
@@ -329,12 +349,11 @@ if __name__ == "__main__":
     # 优化参数
     optimized_params = strategy.optimize_parameters()
     print("Optimized Parameters:", optimized_params)
-
     # 运行优化后的策略
     final_value, portfolio_values = strategy.run_optimized_strategy()
     print("Final Portfolio Value:", final_value)
     xtdata.subscribe_whole_quote(['000001.SH'], callback=on_tick)
-    strategy.xt_trader.run_forever()
+    xt_trader.run_forever()
 
 '''
 #  代码说明
