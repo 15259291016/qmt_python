@@ -162,9 +162,10 @@ class Logger(object):
                         f" {self.config['log_size_limit']}) to prevent the bad effect on web service performance)"
                     )
 
+                now = datetime.datetime.now() + datetime.timedelta(hours=8)
                 msg = "{}|{}|{}|{}|{}|{}".format(
                     level,
-                    str((datetime.datetime.now() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S.%03d")),
+                    now.strftime("%Y-%m-%d %H:%M:%S") + ".%03d" % (now.microsecond // 1000),
                     self.FLAG or "",
                     self.IP or "",
                     env,
@@ -173,9 +174,10 @@ class Logger(object):
                 log_method(msg, stacklevel=3)
             else:
                 # log_method(msg, *args, stacklevel=3, **kwargs)
+                now = datetime.datetime.now() + datetime.timedelta(hours=8)
                 msg = "{}|{}|{}|{}|{}|||||||{}".format(
                     level,
-                    str((datetime.datetime.now() + datetime.timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S.%03d")),
+                    now.strftime("%Y-%m-%d %H:%M:%S") + ".%03d" % (now.microsecond // 1000),
                     self.FLAG,
                     self.IP,
                     env,

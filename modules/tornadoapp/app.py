@@ -40,6 +40,7 @@ from modules.tornadoapp.handler.super_admin_handler import SuperAdminHandler
 from modules.tornadoapp.risk.risk_api import RiskConfigHandler, BlacklistHandler
 from modules.tornadoapp.compliance.compliance_api import ComplianceLogHandler, ComplianceExportHandler, ComplianceRuleHandler
 from modules.tornadoapp.audit.audit_api import AuditLogHandler, AuditExportHandler
+from modules.data_service.api.rest_api import BarDataAPI
 
 
 # 定义路由
@@ -89,6 +90,7 @@ routes = [
     (r"/api/compliance/rule", ComplianceRuleHandler),
     (r"/api/audit/logs", AuditLogHandler),
     (r"/api/audit/export", AuditExportHandler),
+    (r"/api/bar_data", BarDataAPI),
 ]
 
 # 创建带中间件的应用

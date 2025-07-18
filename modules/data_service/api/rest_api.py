@@ -4,6 +4,8 @@ from typing import List, Optional
 import pymysql
 from modules.data_service.config import MYSQL_CONFIG
 import pandas as pd
+from tornado.web import RequestHandler
+from modules.data_service.integration import get_data_service_manager
 
 app = FastAPI(title="行情与采集服务API")
 
@@ -50,4 +52,15 @@ def get_log(ts_code: Optional[str] = None, status: Optional[str] = None, limit: 
     params.append(limit)
     with get_conn() as conn:
         df = pd.read_sql(sql, conn, params=params)
-    return df.to_dict(orient='records') 
+    return df.to_dict(orient='records')
+
+class BarDataAPI(RequestHandler):
+    async def get(self):
+        ts_code = self.get_argument('ts_code')
+        start = self.get_argument('start')
+        end = self.get_argument('end')
+        freq = self.get_argument('freq', '1min')
+        manager = get_data_service_manager()
+        bars = manager.get_bar_data(ts_code, start, end, freq)
+        self.set_header('Content-Type', 'application/json')
+        self.write({'data': [bar.dict() for bar in bars]}) 

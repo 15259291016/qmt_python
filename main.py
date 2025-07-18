@@ -1,10 +1,12 @@
 # coding=utf-8
 import asyncio
+import tornado.platform.asyncio
 import logging
 import threading
 import time
 
 import tornado
+tornado.platform.asyncio.AsyncIOMainLoop().install()
 from xtquant.xttrader import XtQuantTrader
 from xtquant.xttype import StockAccount
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -164,6 +166,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 必须在所有import和代码之前调用install，彻底避免事件循环冲突
+# ！！！请勿移动此行！！！
+
 
 def get_config(environment: str = 'SIMULATION'):
     """获取配置信息"""
@@ -190,17 +195,18 @@ def run_tornado_server():
     """启动Tornado Web 服务"""
     try:
         logger.info("正在启动 Tornado 服务...")
-        tornado.ioloop.IOLoop.current().run_sync(init_beanie)
-        
-        # 集成数据服务API
+        import tornado.httpserver
+        from modules.tornadoapp.app import app
+        from modules.tornadoapp.db.dbUtil import init_beanie
         from modules.data_service.api.tornado_integration import add_data_handlers
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(init_beanie())
         add_data_handlers(app)
-        logger.info("数据服务API已集成到Tornado")
-        
         http_server = tornado.httpserver.HTTPServer(app, max_body_size=1024 * 5)
         http_server.listen(8888)
         logger.info("Tornado 服务启动成功，监听端口: 8888")
         tornado.ioloop.IOLoop.current().start()
+        
     except Exception as e:
         logger.error(f"Tornado 服务启动失败: {e}")
         raise
@@ -245,12 +251,15 @@ def auto_select_and_buy(xt_trader, acc, order_manager, top_n=10):
         for stock in new_stocks:
             try:
                 # 从数据服务获取最新价格
-                latest_price = data_manager.get_latest_price(stock)
-                if latest_price is None:
+                bars = data_manager.get_bar_data(stock, '20240101', '20991231', '1min')
+                if bars:
+                    price = bars[-1].close
+                else:
+                    price = None  # 或做异常处理
+                
+                if price is None:
                     logger.warning(f"无法获取 {stock} 最新价格，使用默认价格")
                     price = 10.0
-                else:
-                    price = latest_price
                 
                 quantity = 100
                 order = order_manager.create_order(stock, "买", price, quantity, acc)
@@ -378,34 +387,15 @@ async def run_trader_system(path, account, environment='SIMULATION'):
             logger.error(f"调度器关闭失败: {e}")
 
 
-async def main(environment: str = 'SIMULATION'):
-    """主程序入口"""
-    try:
-        # 获取配置
-        path, account = get_config(environment)
-        logger.info(f"配置加载成功 - QMT路径: {path}, 账户: {account}")
-        
-        # 启动量化交易系统（在后台线程中运行）
-        trader_task = asyncio.create_task(run_trader_system(path, account, environment))
-        
-        # 启动 Tornado 服务（在后台线程中运行）
-        # tornado_task = asyncio.create_task(
-        #     asyncio.to_thread(run_tornado_server)
-        # )
-        
-        # 等待两个服务运行
-        # await asyncio.gather(trader_task, tornado_task)
-        await asyncio.gather(trader_task)
-        
-    except Exception as e:
-        logger.error(f"主程序运行异常: {e}")
-        raise
+def trader_thread_func(path, account, environment):
+    import asyncio
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(run_trader_system(path, account, environment))
 
 
 if __name__ == "__main__":
     import argparse
-    
-    # 解析命令行参数
     parser = argparse.ArgumentParser(description='多策略量化交易平台')
     parser.add_argument('--env', '--environment', 
                        choices=['SIMULATION', 'PRODUCTION'], 
@@ -415,22 +405,14 @@ if __name__ == "__main__":
                        choices=['live', 'backtest'],
                        default='live',
                        help='运行模式 (live: 实盘/模拟交易, backtest: 回测)')
-    
     args = parser.parse_args()
-    
-    try:
-        logger.info(f"程序启动中... 环境: {args.env}, 模式: {args.mode}")
-        
-        if args.mode == 'backtest':
-            # 运行回测
-            run_multi_strategy_backtest()
-        else:
-            # 运行实盘/模拟交易
-            asyncio.run(main(args.env))
-            
-    except KeyboardInterrupt:
-        logger.info("程序被用户中断")
-    except Exception as e:
-        logger.exception(f"程序异常退出: {e}")
-        exit(1)
+
+    logger.info(f"程序启动中... 环境: {args.env}, 模式: {args.mode}")
+    if args.mode == 'backtest':
+        run_multi_strategy_backtest()
+    else:
+        path, account = get_config(args.env)
+        t = threading.Thread(target=trader_thread_func, args=(path, account, args.env), daemon=True)
+        t.start()
+        run_tornado_server()
 
