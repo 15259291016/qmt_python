@@ -108,15 +108,13 @@ class SimpleStockSelector:
         """计算技术指标因子"""
         try:
             # 按股票分组计算
-            grouped = df.groupby('ts_code')
+            grouped = df.groupby('ts_code', group_keys=False)
             
             # 1. 动量因子 - 20日收益率
-            df['momentum_20d'] = grouped['close'].pct_change(20)
+            df['momentum_20d'] = grouped['close'].transform(lambda x: x.pct_change(20))
             
             # 2. 波动率因子 - 20日波动率
-            df['volatility_20d'] = grouped['close'].transform(
-                lambda x: x.pct_change().rolling(20).std()
-            )
+            df['volatility_20d'] = grouped['close'].transform(lambda x: x.pct_change().rolling(20).std())
             
             # 3. 相对强弱指标 (RSI)
             def calculate_rsi(prices, period=14):
@@ -126,16 +124,15 @@ class SimpleStockSelector:
                 rs = gain / loss
                 rsi = 100 - (100 / (1 + rs))
                 return rsi
-            
             df['rsi_14'] = grouped['close'].transform(calculate_rsi)
             
             # 4. 移动平均线
-            df['ma5'] = grouped['close'].rolling(5).mean()
-            df['ma20'] = grouped['close'].rolling(20).mean()
+            df['ma5'] = grouped['close'].transform(lambda x: x.rolling(5).mean())
+            df['ma20'] = grouped['close'].transform(lambda x: x.rolling(20).mean())
             df['ma_ratio'] = df['ma5'] / df['ma20']
             
             # 5. 成交量因子
-            df['volume_ma5'] = grouped['vol'].rolling(5).mean()
+            df['volume_ma5'] = grouped['vol'].transform(lambda x: x.rolling(5).mean())
             df['volume_ratio'] = df['vol'] / df['volume_ma5']
             
             logger.info("技术指标计算完成")

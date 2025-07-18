@@ -22,6 +22,9 @@ from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
 from modules.tornadoapp.audit.audit_logger import AuditLogger
 from user_strategy.select_stock import QuantitativeStockSelector
 from modules.tornadoapp.oms.backtest_engine import BacktestEngine
+from modules.strategy_manager.manager import StrategyManager
+from modules.strategy_manager.api import add_strategy_handlers
+from modules.strategy_manager.backtest_engine import BacktestEngine as StrategyBacktestEngine
 import pandas as pd
 import random
 
@@ -47,33 +50,112 @@ class SimpleMAStrategy:
         else:
             return 0
 
-# 主流程回测集成示例
-def run_backtest_demo():
-    # 1. 加载A股多品种历史数据（假设已准备好DataFrame，包含symbol字段）
-    # 示例：data = pd.read_csv('multi_stock_data.csv')
-    # 这里用模拟数据
-    dates = pd.date_range('2023-01-01', '2023-03-01')
-    symbols = ['000001.SZ', '000002.SZ']
-    data = []
-    for symbol in symbols:
-        price = 10 + random.random()
-        for dt in dates:
-            price += random.uniform(-0.2, 0.2)
-            data.append({'datetime': dt, 'symbol': symbol, 'open': price, 'high': price+0.1, 'low': price-0.1, 'close': price, 'volume': 10000})
-    df = pd.DataFrame(data)
-    # 2. 多账户多策略
-    accounts = ['acc1', 'acc2']
-    strategies = {
-        'acc1': SimpleMAStrategy(short_window=5, long_window=20),
-        'acc2': SimpleMAStrategy(short_window=10, long_window=30)
-    }
-    # 3. 回测引擎，支持滑点、成交概率
-    engine = BacktestEngine(strategies, df, accounts, initial_capital=1000000, slippage=0.02, fill_prob=0.95)
-    reports = engine.run()
-    for aid, rep in reports.items():
-        print(f"账户: {aid}")
-        print(f"总收益: {rep['total_return']:.2%}, 年化: {rep['annual_return']:.2%}, 夏普: {rep['sharpe']:.2f}, 最大回撤: {rep['max_drawdown']:.2%}")
-        print(rep['equity_curve'].tail())
+# 多策略回测示例
+def run_multi_strategy_backtest():
+    """运行多策略回测"""
+    try:
+        logger.info("开始多策略回测...")
+        
+        # 1. 创建模拟历史数据
+        dates = pd.date_range('2023-01-01', '2023-03-01')
+        symbols = ['000001.SZ', '000002.SZ', '000858.SZ', '002415.SZ', '600036.SH']
+        data = []
+        
+        for symbol in symbols:
+            price = 10 + random.random() * 10
+            for dt in dates:
+                price += random.uniform(-0.2, 0.2)
+                data.append({
+                    'datetime': dt, 
+                    'symbol': symbol, 
+                    'open': price, 
+                    'high': price + 0.1, 
+                    'low': price - 0.1, 
+                    'close': price, 
+                    'volume': random.randint(1000, 10000)
+                })
+        
+        df = pd.DataFrame(data)
+        logger.info(f"生成模拟数据: {len(df)} 条记录，{len(symbols)} 个品种")
+        
+        # 2. 初始化策略管理器
+        from modules.strategy_manager.manager import StrategyManager
+        from modules.tornadoapp.oms.order_manager import OrderManager
+        from modules.tornadoapp.risk.risk_manager import RiskManager
+        from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
+        from modules.tornadoapp.audit.audit_logger import AuditLogger
+        
+        # 创建模拟交易器
+        class MockXtTrader:
+            def query_stock_positions(self, account):
+                return []
+        
+        mock_trader = MockXtTrader()
+        risk_manager = RiskManager()
+        compliance_manager = ComplianceManager()
+        audit_logger = AuditLogger()
+        order_manager = OrderManager(mock_trader, risk_manager, compliance_manager, audit_logger)
+        
+        strategy_manager = StrategyManager(
+            xt_trader=mock_trader,
+            order_manager=order_manager,
+            base_path="backtest_data"
+        )
+        
+        # 3. 添加账户和品种
+        strategy_manager.add_account("backtest_account", None)
+        for symbol in symbols:
+            strategy_manager.add_symbol(symbol)
+        
+        # 4. 加载策略配置
+        strategy_manager.load_strategies_from_config()
+        
+        # 5. 分配策略到账户
+        strategy_manager.assign_strategy_to_account("ma_5_20", "backtest_account", ["000001.SZ", "000002.SZ"])
+        strategy_manager.assign_strategy_to_account("ma_10_30", "backtest_account", ["000858.SZ", "002415.SZ", "600036.SH"])
+        
+        # 6. 运行回测
+        from modules.strategy_manager.backtest_engine import BacktestEngine as StrategyBacktestEngine
+        
+        backtest_engine = StrategyBacktestEngine(
+            strategy_manager=strategy_manager,
+            data=df,
+            initial_capital=1000000,
+            commission_rate=0.0003,
+            slippage=0.001
+        )
+        
+        results = backtest_engine.run_backtest(
+            start_date=pd.Timestamp('2023-01-01'),
+            end_date=pd.Timestamp('2023-03-01')
+        )
+        
+        # 7. 输出回测结果
+        logger.info("回测完成，结果如下:")
+        for strategy_name, result in results.items():
+            logger.info(f"策略: {strategy_name}")
+            logger.info(f"  总收益率: {result.total_return:.2%}")
+            logger.info(f"  年化收益率: {result.annual_return:.2%}")
+            logger.info(f"  夏普比率: {result.sharpe_ratio:.2f}")
+            logger.info(f"  最大回撤: {result.max_drawdown:.2%}")
+            logger.info(f"  胜率: {result.win_rate:.2%}")
+            logger.info(f"  总交易次数: {result.total_trades}")
+            logger.info("")
+        
+        # 8. 生成回测报告
+        report = backtest_engine.generate_report()
+        logger.info("回测报告:")
+        logger.info(report)
+        
+        # 9. 保存回测结果
+        backtest_engine.save_results()
+        
+        logger.info("多策略回测完成")
+        
+    except Exception as e:
+        logger.error(f"多策略回测失败: {e}")
+        import traceback
+        traceback.print_exc()
 
 # 配置日志
 logging.basicConfig(
@@ -109,6 +191,12 @@ def run_tornado_server():
     try:
         logger.info("正在启动 Tornado 服务...")
         tornado.ioloop.IOLoop.current().run_sync(init_beanie)
+        
+        # 集成数据服务API
+        from modules.data_service.api.tornado_integration import add_data_handlers
+        add_data_handlers(app)
+        logger.info("数据服务API已集成到Tornado")
+        
         http_server = tornado.httpserver.HTTPServer(app, max_body_size=1024 * 5)
         http_server.listen(8888)
         logger.info("Tornado 服务启动成功，监听端口: 8888")
@@ -150,14 +238,23 @@ def auto_select_and_buy(xt_trader, acc, order_manager, top_n=10):
         
         logger.info(f"准备买入 {len(new_stocks)} 只新股票: {new_stocks}")
         
-        # 执行买入操作
+        # 执行买入操作，使用数据服务获取最新价格
+        from modules.data_service.integration import get_data_service_manager
+        data_manager = get_data_service_manager()
+        
         for stock in new_stocks:
             try:
-                # 这里可以添加实时价格获取逻辑
-                price = 10.0  # 可替换为实时价格
+                # 从数据服务获取最新价格
+                latest_price = data_manager.get_latest_price(stock)
+                if latest_price is None:
+                    logger.warning(f"无法获取 {stock} 最新价格，使用默认价格")
+                    price = 10.0
+                else:
+                    price = latest_price
+                
                 quantity = 100
                 order = order_manager.create_order(stock, "买", price, quantity, acc)
-                logger.info(f"自动买入下单: {stock}, 订单: {order}")
+                logger.info(f"自动买入下单: {stock}, 价格: {price}, 订单: {order}")
             except Exception as e:
                 logger.error(f"买入 {stock} 失败: {e}")
         
@@ -169,12 +266,12 @@ def auto_select_and_buy(xt_trader, acc, order_manager, top_n=10):
 
 
 async def run_trader_system(path, account, environment='SIMULATION'):
-    """动量化交易系统"""
+    """多策略量化交易系统"""
     try:
         from utils.environment_manager import get_env_manager
         env_manager = get_env_manager()
         
-        logger.info(f"正在启动量化交易系统 ({environment})...")
+        logger.info(f"正在启动多策略量化交易系统 ({environment})...")
         logger.info(f"环境信息: {env_manager.get_environment_name()}")
         logger.info(f"QMT路径: {path}")
         logger.info(f"账户: {account}")
@@ -215,16 +312,38 @@ async def run_trader_system(path, account, environment='SIMULATION'):
         
         logger.info("交易账户连接成功")
         
-        # 启动策略线程
-        thread_list = []
-        # thread_list.append(threading.Thread(target=auto_Buy.run_strategy, args=(acc, xt_trader, order_manager)))
-        # thread_list.append(threading.Thread(target=select_stock.run_strategy, args=()))
-        thread_list.append(threading.Thread(target=sell.run_strategy, args=("000011.SZ", acc, xt_trader, order_manager)))
+        # 删除 data_manager.start_data_collection(auto_collect=True) 的所有调用
+        # 如果需要采集功能，请用 daily_collector.collect_all_daily 独立实现
         
-        for thread in thread_list:
-            thread.daemon = True
-            thread.start()
-            logger.info(f"策略线程启动: {thread.name}")
+        # 初始化多策略管理器
+        strategy_manager = StrategyManager(
+            xt_trader=xt_trader,
+            order_manager=order_manager,
+            data_service_manager=None, # 移除 data_manager
+            base_path="strategy_data"
+        )
+        
+        # 添加账户和品种
+        strategy_manager.add_account(account, acc)
+        strategy_manager.add_symbol("000001.SZ")
+        strategy_manager.add_symbol("000002.SZ")
+        strategy_manager.add_symbol("000858.SZ")
+        strategy_manager.add_symbol("002415.SZ")
+        strategy_manager.add_symbol("600036.SH")
+        
+        # 加载策略配置
+        strategy_manager.load_strategies_from_config()
+        
+        # 分配策略到账户
+        strategy_manager.assign_strategy_to_account("ma_5_20", account, ["000001.SZ", "000002.SZ"])
+        strategy_manager.assign_strategy_to_account("ma_10_30", account, ["000858.SZ", "002415.SZ", "600036.SH"])
+        
+        # 启动所有策略
+        strategy_manager.start_all_strategies()
+        
+        # 集成策略管理API到Tornado
+        add_strategy_handlers(app, strategy_manager)
+        logger.info("策略管理API已集成到Tornado")
         
         # 启动自动选股-下单闭环，每日定时执行
         def daily_select_and_buy():
@@ -233,11 +352,23 @@ async def run_trader_system(path, account, environment='SIMULATION'):
                 time.sleep(86400)  # 每天执行一次
         threading.Thread(target=daily_select_and_buy, daemon=True).start()
         
-        logger.info("量化交易系统启动完成")
+        # 启动策略绩效计算定时任务
+        def daily_performance_calculation():
+            while True:
+                try:
+                    for strategy_name in strategy_manager.strategies:
+                        strategy_manager.calculate_performance(strategy_name)
+                    logger.info("策略绩效计算完成")
+                except Exception as e:
+                    logger.error(f"策略绩效计算失败: {e}")
+                time.sleep(3600)  # 每小时计算一次
+        threading.Thread(target=daily_performance_calculation, daemon=True).start()
+        
+        logger.info("多策略量化交易系统启动完成")
         xt_trader.run_forever()
         
     except Exception as e:
-        logger.error(f"量化交易系统启动失败: {e}")
+        logger.error(f"多策略量化交易系统启动失败: {e}")
         raise
     finally:
         try:
@@ -275,22 +406,31 @@ if __name__ == "__main__":
     import argparse
     
     # 解析命令行参数
-    parser = argparse.ArgumentParser(description='量化交易平台')
+    parser = argparse.ArgumentParser(description='多策略量化交易平台')
     parser.add_argument('--env', '--environment', 
                        choices=['SIMULATION', 'PRODUCTION'], 
                        default='SIMULATION',
                        help='运行环境 (SIMULATION: 模拟环境, PRODUCTION: 实盘环境)')
+    parser.add_argument('--mode', '--run-mode',
+                       choices=['live', 'backtest'],
+                       default='live',
+                       help='运行模式 (live: 实盘/模拟交易, backtest: 回测)')
     
     args = parser.parse_args()
     
     try:
-        logger.info(f"程序启动中... 环境: {args.env}")
-        asyncio.run(main(args.env))
+        logger.info(f"程序启动中... 环境: {args.env}, 模式: {args.mode}")
+        
+        if args.mode == 'backtest':
+            # 运行回测
+            run_multi_strategy_backtest()
+        else:
+            # 运行实盘/模拟交易
+            asyncio.run(main(args.env))
+            
     except KeyboardInterrupt:
         logger.info("程序被用户中断")
     except Exception as e:
         logger.exception(f"程序异常退出: {e}")
         exit(1)
-    # 回测集成示例
-    run_backtest_demo()
 
