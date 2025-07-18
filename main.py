@@ -83,12 +83,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def get_config():
+def get_config(environment: str = 'SIMULATION'):
     """获取配置信息"""
     try:
-        configData = Cs.returnConfigData()
-        path = configData["QMT_PATH"][0]
-        account = configData["account"][0]
+        from utils.environment_manager import get_env_manager
+        env_manager = get_env_manager()
+        
+        # 切换到指定环境
+        if not env_manager.switch_environment(environment):
+            logger.error(f"切换到 {environment} 环境失败")
+            raise Exception(f"环境切换失败: {environment}")
+        
+        path = env_manager.get_qmt_path()
+        account = env_manager.get_account()
+        
+        logger.info(f"使用 {environment} 环境: QMT路径={path}, 账户={account}")
         return path, account
     except Exception as e:
         logger.error(f"配置读取失败: {e}")
@@ -110,32 +119,65 @@ def run_tornado_server():
 
 
 def auto_select_and_buy(xt_trader, acc, order_manager, top_n=10):
-    configData = Cs.returnConfigData()
-    toshare_token = configData["toshare_token"]
-    db_config = {
-        'host': 'localhost',
-        'user': 'root',
-        'password': '6116988.niu',
-        'database': 'stock_data',
-        'port': 3306,
-        'charset': 'utf8mb4'
-    }
-    selector = QuantitativeStockSelector(token=toshare_token, db_config=db_config)
-    stock_pool = selector.get_top_stocks(top_n=top_n)
-    positions = xt_trader.query_stock_positions(acc)
-    held_stocks = {p.stock_code for p in positions} if positions else set()
-    for stock in stock_pool:
-        if stock not in held_stocks:
-            price = 10.0  # 可替换为实时价格
-            quantity = 100
-            order = order_manager.create_order(stock, "买", price, quantity, acc)
-            print(f"自动买入下单: {stock}, 订单: {order}")
+    try:
+        from utils.environment_manager import get_env_manager
+        env_manager = get_env_manager()
+        
+        toshare_token = env_manager.get_tushare_token()
+        db_config = env_manager.get_database_config()
+        
+        # 使用简化的选股器
+        from user_strategy.simple_select_stock import SimpleStockSelector
+        selector = SimpleStockSelector(token=toshare_token, db_config=db_config)
+        stock_pool = selector.get_top_stocks(top_n=top_n)
+        
+        if not stock_pool:
+            logger.warning("未获取到推荐股票")
+            return
+        
+        logger.info(f"获取到 {len(stock_pool)} 只推荐股票: {stock_pool}")
+        
+        # 查询当前持仓
+        positions = xt_trader.query_stock_positions(acc)
+        held_stocks = {p.stock_code for p in positions} if positions else set()
+        
+        # 过滤掉已持有的股票
+        new_stocks = [stock for stock in stock_pool if stock not in held_stocks]
+        
+        if not new_stocks:
+            logger.info("所有推荐股票都已持有")
+            return
+        
+        logger.info(f"准备买入 {len(new_stocks)} 只新股票: {new_stocks}")
+        
+        # 执行买入操作
+        for stock in new_stocks:
+            try:
+                # 这里可以添加实时价格获取逻辑
+                price = 10.0  # 可替换为实时价格
+                quantity = 100
+                order = order_manager.create_order(stock, "买", price, quantity, acc)
+                logger.info(f"自动买入下单: {stock}, 订单: {order}")
+            except Exception as e:
+                logger.error(f"买入 {stock} 失败: {e}")
+        
+        # 关闭选股器连接
+        selector.close()
+        
+    except Exception as e:
+        logger.error(f"自动选股买入失败: {e}")
 
 
-async def run_trader_system(path, account):
+async def run_trader_system(path, account, environment='SIMULATION'):
     """动量化交易系统"""
     try:
-        logger.info("正在启动量化交易系统...")
+        from utils.environment_manager import get_env_manager
+        env_manager = get_env_manager()
+        
+        logger.info(f"正在启动量化交易系统 ({environment})...")
+        logger.info(f"环境信息: {env_manager.get_environment_name()}")
+        logger.info(f"QMT路径: {path}")
+        logger.info(f"账户: {account}")
         
         # 初始化调度器
         scheduler = BackgroundScheduler()
@@ -205,15 +247,15 @@ async def run_trader_system(path, account):
             logger.error(f"调度器关闭失败: {e}")
 
 
-async def main():
+async def main(environment: str = 'SIMULATION'):
     """主程序入口"""
     try:
         # 获取配置
-        path, account = get_config()
+        path, account = get_config(environment)
         logger.info(f"配置加载成功 - QMT路径: {path}, 账户: {account}")
         
         # 启动量化交易系统（在后台线程中运行）
-        trader_task = asyncio.create_task(run_trader_system(path, account))
+        trader_task = asyncio.create_task(run_trader_system(path, account, environment))
         
         # 启动 Tornado 服务（在后台线程中运行）
         # tornado_task = asyncio.create_task(
@@ -230,9 +272,20 @@ async def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='量化交易平台')
+    parser.add_argument('--env', '--environment', 
+                       choices=['SIMULATION', 'PRODUCTION'], 
+                       default='SIMULATION',
+                       help='运行环境 (SIMULATION: 模拟环境, PRODUCTION: 实盘环境)')
+    
+    args = parser.parse_args()
+    
     try:
-        logger.info("程序启动中...")
-        asyncio.run(main())
+        logger.info(f"程序启动中... 环境: {args.env}")
+        asyncio.run(main(args.env))
     except KeyboardInterrupt:
         logger.info("程序被用户中断")
     except Exception as e:
