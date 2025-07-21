@@ -7,6 +7,7 @@ from modules.tornadoapp.risk.risk_manager import RiskManager
 from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
 from modules.tornadoapp.audit.audit_logger import AuditLogger
 from xtquant import xtconstant
+import asyncio
 
 class OrderManager:
     def __init__(self, xt_trader, risk_manager=None, compliance_manager=None, audit_logger=None):
@@ -19,19 +20,17 @@ class OrderManager:
         self.audit_logger = audit_logger or AuditLogger()
 
     def create_order(self, symbol, side, price, quantity, account, user="system"):
-        # 风控校验
         risk_pass, risk_msg = self.risk_manager.check_order(symbol, price, quantity, account)
         if not risk_pass:
             self.audit_logger.log(user, "order_rejected_risk", {
                 "symbol": symbol, "side": side, "price": price, "quantity": quantity, "reason": risk_msg
             })
             return None
-        # 合规校验
         order_info = {"symbol": symbol, "side": side, "price": price, "quantity": quantity, "account": account}
-        if not self.compliance_manager.check(order_info):
+        compliance_pass = self.compliance_manager.check(order_info)
+        if not compliance_pass:
             self.audit_logger.log(user, "order_rejected_compliance", order_info)
             return None
-        # 通过风控与合规，记录审计
         self.audit_logger.log(user, "order_create", order_info)
         order_id = self._generate_order_id()
         order = Order(order_id, symbol, side, price, quantity, account=account)
@@ -72,16 +71,13 @@ class OrderManager:
                 order.filled_quantity = filled_quantity
                 order.avg_fill_price = avg_fill_price
                 order.update_time = datetime.now()
-                # 成交后更新风控
                 if status == OrderStatus.FILLED:
                     self.risk_manager.on_order_filled(order.price, order.filled_quantity)
-                # 审计日志
                 self.audit_logger.log(user, "order_status_update", {
                     "order_id": order_id, "status": status.name, "filled_quantity": filled_quantity, "avg_fill_price": avg_fill_price
                 })
 
     def cancel_order(self, broker_order_id, user="system"):
-        # 撤单前审计
         self.audit_logger.log(user, "order_cancel", {"broker_order_id": broker_order_id})
         self.xt_trader.cancel_order(broker_order_id)
 

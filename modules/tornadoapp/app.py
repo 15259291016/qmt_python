@@ -41,6 +41,7 @@ from modules.tornadoapp.risk.risk_api import RiskConfigHandler, BlacklistHandler
 from modules.tornadoapp.compliance.compliance_api import ComplianceLogHandler, ComplianceExportHandler, ComplianceRuleHandler
 from modules.tornadoapp.audit.audit_api import AuditLogHandler, AuditExportHandler
 from modules.data_service.api.rest_api import BarDataAPI
+from modules.tornadoapp.position.position_api import add_position_handlers
 
 
 # 定义路由
@@ -100,4 +101,6 @@ app = create_app_with_middlewares(
     enable_cors=True,  # 启用 CORS 中间件
     debug=True  # 开发模式
 )
-# 
+
+# 添加持仓分析路由
+add_position_handlers(app)

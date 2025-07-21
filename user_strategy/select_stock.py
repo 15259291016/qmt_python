@@ -62,6 +62,7 @@ import time
 from tqdm import tqdm
 import threading
 import config.ConfigServer as Cs
+import asyncio
 
 
 class QuantitativeStockSelector:
@@ -95,11 +96,12 @@ class QuantitativeStockSelector:
         """关闭数据库连接"""
         self.conn.close()
 
-    def update_daily_data(self):
+    async def update_daily_data(self):
         """增量更新日频数据"""
         while True:
-            latest_date = self.pro.trade_cal(exchange='SSE', is_open='1')['cal_date'].iloc[-1]
-            new_data = self.pro.daily(trade_date=latest_date)
+            loop = asyncio.get_event_loop()
+            latest_date = await loop.run_in_executor(None, lambda: self.pro.trade_cal(exchange='SSE', is_open='1')['cal_date'].iloc[-1])
+            new_data = await loop.run_in_executor(None, self.pro.daily, None, latest_date)
 
             # 加载本地数据
             local_data = self.load_data('daily_data')
@@ -110,7 +112,7 @@ class QuantitativeStockSelector:
             # 保存更新后的数据
             self.save_data('daily_data', updated_data)
             print(f"数据已更新至 {latest_date}")
-            time.sleep(86400)  # 每天更新一次
+            await asyncio.sleep(86400)  # 每天更新一次
 
     def get_factor_exposure(self):
         """幻方风格多因子体系"""
@@ -129,15 +131,16 @@ class QuantitativeStockSelector:
             factors.extend(group)
         return factors
 
-    def prepare_dataset(self):
+    async def prepare_dataset(self):
         """准备全量因子数据"""
         print("正在加载基础数据...")
+        loop = asyncio.get_event_loop()
         # 获取股票池
-        stock_list = self.pro.stock_basic(exchange='', list_status='L', fields='ts_code,name,industry,list_date')
+        stock_list = await loop.run_in_executor(None, self.pro.stock_basic, '', 'L', 'ts_code,name,industry,list_date')
 
         # 获取日频数据
         df_daily = self.load_data('daily_data')
-        df_adj = self.pro.adj_factor(start_date=self.start_date, end_date=self.end_date)
+        df_adj = await loop.run_in_executor(None, self.pro.adj_factor, self.start_date, self.end_date)
         daily_merged = pd.merge(df_daily, df_adj, on=['ts_code', 'trade_date'])
 
         # 获取财务数据 - 需要为每个股票单独获取财务指标
@@ -145,7 +148,7 @@ class QuantitativeStockSelector:
         fina_list = []
         for ts_code in stock_list['ts_code'].tolist():
             try:
-                fina_data = self.pro.fina_indicator(ts_code=ts_code, period=self.end_date[:4] + '1231', fields='ts_code,roe,gp,ocfps,debt_to_assets')
+                fina_data = await loop.run_in_executor(None, self.pro.fina_indicator, ts_code, self.end_date[:4] + '1231', 'ts_code,roe,gp,ocfps,debt_to_assets')
                 if not fina_data.empty:
                     fina_list.append(fina_data)
             except Exception as e:
@@ -312,9 +315,9 @@ class QuantitativeStockSelector:
             print("当前策略表现：", current_performance)
             time.sleep(3600)  # 每小时检查一次
 
-    def get_top_stocks(self, top_n=10):
+    async def get_top_stocks(self, top_n=10):
         """输出当前topN股票池"""
-        df = self.prepare_dataset()
+        df = await self.prepare_dataset()
         df = self.calculate_factors(df)
         # 简单等权重打分
         if self.factor_weights is None:

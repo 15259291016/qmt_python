@@ -236,7 +236,7 @@ class StrategyManager:
             # 等待线程结束
             if strategy_name in self.strategy_threads:
                 thread = self.strategy_threads[strategy_name]
-                thread.join(timeout=10)  # 最多等待10秒
+                thread.join(10)  # 最多等待10秒
             
             # 更新状态
             state['status'] = 'stopped'

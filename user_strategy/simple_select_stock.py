@@ -14,6 +14,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import ConfigServer as Cs
+import asyncio
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -50,58 +51,37 @@ class SimpleStockSelector:
         else:
             self.connection = None
     
-    def get_stock_list(self):
+    async def get_stock_list(self):
         """获取股票列表"""
-        try:
-            # 获取A股股票列表
-            stock_list = self.pro.stock_basic(
-                exchange='', 
-                list_status='L', 
-                fields='ts_code,name,industry,list_date'
-            )
-            logger.info(f"获取到 {len(stock_list)} 只股票")
-            return stock_list
-        except Exception as e:
-            logger.error(f"获取股票列表失败: {e}")
-            return pd.DataFrame()
+        loop = asyncio.get_event_loop()
+        stock_list = await loop.run_in_executor(None, self.pro.stock_basic, '', 'L', 'ts_code,name,industry,list_date')
+        logger.info(f"获取到 {len(stock_list)} 只股票")
+        return stock_list
     
-    def get_daily_data(self, ts_codes, days=60):
+    async def get_daily_data(self, ts_codes, days=60):
         """获取日线数据"""
-        try:
-            end_date = datetime.now().strftime('%Y%m%d')
-            start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
-            
-            # 分批获取数据，每批最多1000只股票
-            batch_size = 1000
-            all_daily_data = []
-            
-            for i in range(0, len(ts_codes), batch_size):
-                batch_codes = ts_codes[i:i + batch_size]
-                logger.info(f"获取第 {i//batch_size + 1} 批数据，包含 {len(batch_codes)} 只股票")
-                
-                try:
-                    batch_data = self.pro.daily(
-                        ts_code=','.join(batch_codes),
-                        start_date=start_date,
-                        end_date=end_date,
-                        fields='ts_code,trade_date,open,high,low,close,vol,amount,pct_chg'
-                    )
-                    if not batch_data.empty:
-                        all_daily_data.append(batch_data)
-                except Exception as e:
-                    logger.warning(f"第 {i//batch_size + 1} 批数据获取失败: {e}")
-                    continue
-            
-            if all_daily_data:
-                daily_data = pd.concat(all_daily_data, ignore_index=True)
-                logger.info(f"总共获取到 {len(daily_data)} 条日线数据")
-                return daily_data
-            else:
-                logger.error("所有批次数据获取都失败")
-                return pd.DataFrame()
-                
-        except Exception as e:
-            logger.error(f"获取日线数据失败: {e}")
+        loop = asyncio.get_event_loop()
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
+        batch_size = 1000
+        all_daily_data = []
+        for i in range(0, len(ts_codes), batch_size):
+            batch_codes = ts_codes[i:i + batch_size]
+            logger.info(f"获取第 {i//batch_size + 1} 批数据, 包含 {len(batch_codes)} 只股票")
+            try:
+                batch_data = await loop.run_in_executor(None, self.pro.daily, ','.join(batch_codes), start_date, end_date, 'ts_code,trade_date,open,high,low,close,vol,amount,pct_chg')
+                if not batch_data.empty:
+                    all_daily_data.append(batch_data)
+            except Exception as e:
+                logger.warning(f"第 {i//batch_size + 1} 批数据获取失败: {e}")
+                continue
+            await asyncio.sleep(1)
+        if all_daily_data:
+            daily_data = pd.concat(all_daily_data, ignore_index=True)
+            logger.info(f"总共获取到 {len(daily_data)} 条日线数据")
+            return daily_data
+        else:
+            logger.error("所有批次数据获取都失败")
             return pd.DataFrame()
     
     def calculate_technical_factors(self, df):
@@ -218,59 +198,28 @@ class SimpleStockSelector:
             df['composite_score'] = 0
             return df
     
-    def get_top_stocks(self, top_n=10, min_volume=1000000):
+    async def get_top_stocks(self, top_n=10, min_volume=1000000):
         """获取Top N股票"""
-        try:
-            logger.info("开始选股流程...")
-            
-            # 1. 获取股票列表
-            stock_list = self.get_stock_list()
-            if stock_list.empty:
-                logger.error("无法获取股票列表")
-                return []
-            
-            # 2. 获取日线数据
-            ts_codes = stock_list['ts_code'].tolist()
-            daily_data = self.get_daily_data(ts_codes)
-            if daily_data.empty:
-                logger.error("无法获取日线数据")
-                return []
-            
-            # 3. 计算技术指标
-            daily_data = self.calculate_technical_factors(daily_data)
-            
-            # 4. 计算质量因子
-            daily_data = self.calculate_quality_factors(daily_data)
-            
-            # 5. 因子标准化
-            daily_data = self.normalize_factors(daily_data)
-            
-            # 6. 计算综合评分
-            daily_data = self.calculate_composite_score(daily_data)
-            
-            # 7. 筛选条件
-            # 获取最新数据
-            latest_date = daily_data['trade_date'].max()
-            latest_data = daily_data[daily_data['trade_date'] == latest_date].copy()
-            
-            # 筛选条件
-            filtered_data = latest_data[
-                (latest_data['vol'] >= min_volume) &  # 最小成交量
-                (latest_data['close'] > 0) &  # 价格大于0
-                (latest_data['composite_score'].notna())  # 评分不为空
-            ]
-            
-            # 8. 排序并返回Top N
-            top_stocks = filtered_data.nlargest(top_n, 'composite_score')
-            
-            logger.info(f"选股完成，返回 {len(top_stocks)} 只股票")
-            
-            # 返回股票代码列表
-            return top_stocks['ts_code'].tolist()
-            
-        except Exception as e:
-            logger.error(f"选股过程失败: {e}")
+        logger.info("开始选股流程...")
+        stock_list = await self.get_stock_list()
+        if stock_list.empty:
+            logger.error("无法获取股票列表")
             return []
+        ts_codes = stock_list['ts_code'].tolist()
+        daily_data = await self.get_daily_data(ts_codes)
+        if daily_data.empty:
+            logger.error("无法获取日线数据")
+            return []
+        daily_data = self.calculate_technical_factors(daily_data)
+        daily_data = self.calculate_quality_factors(daily_data)
+        daily_data = self.normalize_factors(daily_data)
+        daily_data = self.calculate_composite_score(daily_data)
+        latest_date = daily_data['trade_date'].max()
+        latest_data = daily_data[daily_data['trade_date'] == latest_date].copy()
+        filtered_data = latest_data[(latest_data['vol'] >= min_volume) & (latest_data['close'] > 0) & (latest_data['composite_score'].notna())]
+        top_stocks = filtered_data.nlargest(top_n, 'composite_score')
+        logger.info(f"选股完成，返回 {len(top_stocks)} 只股票")
+        return top_stocks['ts_code'].tolist()
     
     def get_stock_details(self, ts_codes):
         """获取股票详细信息"""
@@ -310,7 +259,7 @@ def run_simple_strategy(environment: str = 'SIMULATION'):
         selector = SimpleStockSelector(token=toshare_token, db_config=db_config)
         
         # 获取Top 10股票
-        top_stocks = selector.get_top_stocks(top_n=10)
+        top_stocks = asyncio.run(selector.get_top_stocks(top_n=10))
         
         if top_stocks:
             print(f"\n推荐股票列表 (Top 10):")

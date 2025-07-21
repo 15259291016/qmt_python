@@ -14,24 +14,27 @@ class TushareProSource(MarketDataSourceBase):
         return df['ts_code'].tolist()
 
     def get_bar_data(self, ts_code, start_time, end_time, freq):
+        import time
         # freq: '1min', '5min', '15min', '30min', '60min', 'day'
         if freq == 'day':
             df = self.pro.daily(ts_code=ts_code, start_date=start_time, end_date=end_time)
+            time.sleep(31)  # 限频：每分钟最多2次
         else:
             # tushare分钟线接口
             df = self.pro.query('stk_mins', ts_code=ts_code, start_date=start_time, end_date=end_time, freq=freq)
+            time.sleep(31)  # 限频：每分钟最多2次
         bars = []
         for _, row in df.iterrows():
             bars.append(BarData(
-                ts_code=row['ts_code'],
-                trade_time=row.get('trade_time', row.get('trade_date', '')),
-                open=row['open'],
-                high=row['high'],
-                low=row['low'],
-                close=row['close'],
-                volume=row['vol'],
-                amount=row.get('amount', 0),
-                freq=freq
+                ts_code=str(row['ts_code']),
+                trade_time=str(row.get('trade_time', row.get('trade_date', ''))),
+                open=float(row['open']),
+                high=float(row['high']),
+                low=float(row['low']),
+                close=float(row['close']),
+                volume=float(row['vol']),
+                amount=float(row.get('amount', 0) or 0),
+                freq=str(freq)
             ))
         return bars
 
