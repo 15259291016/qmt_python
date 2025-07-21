@@ -254,28 +254,3 @@ if (env_name := os.getenv("DEPLOY_ENV", "").lower()) == "dev_local":
     logger = Logger()
 else:
     logger = Logger()
-
-
-if __name__ == "__main__":
-    ## 必备参数
-    trace_id = 1  ## 唯一id，可用task_id
-    user = "hanlinwu"  ##使用用户
-    ## 可选参数
-    behavior = "Chat"
-    status = "Start"
-    timecost = 0
-    others = json.dumps({"other_params": "test"})
-    logger.info(trace_id, user, behavior, status, timecost, others)
-    logger.debug(trace_id, user, behavior, status, timecost, others)
-    logger.warn(trace_id, user, behavior, status, timecost, others)
-    logger.warning(trace_id, user, behavior, status, timecost, others)
-    logger.error(trace_id, user, behavior, status, timecost, others)
-    # logger.fatal(trace_id, user, behavior, status, timecost, others)
-
-    try:
-        a = 1
-        b = 0
-        c = a / b
-    except:
-        logger.exception(trace_id, user, behavior, status, timecost, others)
-    time.sleep(0.1)

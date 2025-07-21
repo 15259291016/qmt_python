@@ -197,27 +197,6 @@ class AuthManager {
 // 创建全局认证管理器实例
 window.authManager = new AuthManager();
 
-// 使用示例
-async function exampleUsage() {
-    try {
-        // 登录
-        await authManager.login('username', 'password');
-        
-        // 获取用户资料（会自动处理无感刷新）
-        const profile = await authManager.getProfile();
-        console.log('User profile:', profile);
-        
-        // 更新用户资料（会自动处理无感刷新）
-        const updatedProfile = await authManager.updateProfile({
-            full_name: 'New Name'
-        });
-        console.log('Updated profile:', updatedProfile);
-        
-    } catch (error) {
-        console.error('Error:', error);
-    }
-}
-
 // 页面加载时检查token状态
 document.addEventListener('DOMContentLoaded', () => {
     if (authManager.accessToken) {

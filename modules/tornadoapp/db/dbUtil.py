@@ -3,7 +3,6 @@ from beanie import init_beanie as _init_beanie
 from motor.motor_tornado import MotorClient
 from dotenv import load_dotenv
 
-from modules.tornadoapp.model import demomodel
 from modules.tornadoapp.model.user_model import User, UserSession
 from modules.tornadoapp.model.permission_model import Role, Permission, UserRole, PermissionGroup
 from modules.tornadoapp.model.wx_bind import WxBind
@@ -52,7 +51,6 @@ async def init_beanie():
     await _init_beanie(
         database=database, 
         document_models=[
-            demomodel.DemoModel,
             User,
             UserSession,
             Role,
