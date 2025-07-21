@@ -5,28 +5,24 @@ from datetime import datetime, time
 
 def is_trading_time():
     """
-    判断当前时间是否为交易时间。
-    假设交易时间是周一至周五的上午9:30至下午3:00。
+    判断当前时间是否为中国A股交易时间。
+    - 交易日：周一至周五（不含法定节假日）
+    - 上午 9:30-11:30，下午 13:00-15:00
     """
-    # 获取当前时间
     now = datetime.now()
-
     # 判断是否为工作日（周一至周五）
     if now.weekday() >= 5:  # 周六（5）和周日（6）
         return False
-
-    # 定义交易时间范围
-    start_time = time(9, 30)  # 上午9:30
-    end_time = time(15, 0)    # 下午3:00
-
-    # 获取当前时间的时分秒部分
+    # 定义交易时间段
+    morning_start = time(9, 30)
+    morning_end = time(11, 30)
+    afternoon_start = time(13, 0)
+    afternoon_end = time(15, 0)
     current_time = now.time()
-
-    # 判断当前时间是否在交易时间范围内
-    if start_time <= current_time <= end_time:
-        return True
-    else:
-        return False
+    # 判断是否在交易时间段内
+    in_morning = morning_start <= current_time <= morning_end
+    in_afternoon = afternoon_start <= current_time <= afternoon_end
+    return in_morning or in_afternoon
 
 
 

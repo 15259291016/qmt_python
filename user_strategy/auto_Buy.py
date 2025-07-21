@@ -10,7 +10,7 @@ from xtquant import xtdata, xttrader, xtconstant
 
 from utils.callback import MyXtQuantTraderCallback
 from user_strategy.selection import StockSelector
-from utils.date_util import get_today_trade_day
+from utils.date_util import get_today_trade_day, is_trading_time
 
 
 class AutoTrader:
@@ -21,6 +21,9 @@ class AutoTrader:
 
     def execute_trades(self, stocks):
         """执行交易"""
+        if not is_trading_time():
+            print("[自动买入] 当前非交易时间，跳过本次下单。")
+            return
         for stock in stocks:
             try:
                 # 获取当前价格
@@ -44,6 +47,10 @@ class AutoTrader:
     def daily_trading(self):
         """每日交易逻辑"""
         while True:
+            if not is_trading_time():
+                print("[自动买入] 当前非交易时间，等待...")
+                time.sleep(60)
+                continue
             # 获取选股结果
             top_stocks = self.stock_selector.get_top_stocks(top_n=20)
             stock_codes = top_stocks['ts_code'].tolist()

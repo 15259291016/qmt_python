@@ -42,6 +42,7 @@ from modules.tornadoapp.compliance.compliance_api import ComplianceLogHandler, C
 from modules.tornadoapp.audit.audit_api import AuditLogHandler, AuditExportHandler
 from modules.data_service.api.rest_api import BarDataAPI
 from modules.tornadoapp.position.position_api import add_position_handlers
+from modules.stock_selector.api import add_stock_selector_handlers
 
 
 # 定义路由
@@ -104,3 +105,5 @@ app = create_app_with_middlewares(
 
 # 添加持仓分析路由
 add_position_handlers(app)
+# 添加选股API路由
+add_stock_selector_handlers(app)

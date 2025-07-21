@@ -4,7 +4,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 
 from tornado.web import RequestHandler
-from ..define.base.handler import BaseHandler
+from modules.tornadoapp.define.base.handler import BaseHandler
 from ..define.enum.response_model import Status, Message
 from ..position.xtquant_position_manager import XtQuantPositionManager
 import configs.ConfigServer as Cs

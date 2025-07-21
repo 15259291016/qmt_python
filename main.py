@@ -29,6 +29,45 @@ from modules.strategy_manager.api import add_strategy_handlers
 from modules.strategy_manager.backtest_engine import BacktestEngine as StrategyBacktestEngine
 import pandas as pd
 import random
+from modules.tornadoapp.auto_trader import monitor_positions_and_trade, TechnicalAnalyzer
+from modules.stock_selector.selector import StockSelector
+from modules.tornadoapp.position.position_analyzer import PositionAnalyzer
+import tushare as ts
+from utils.date_util import is_trading_time
+
+# 全局行情缓存
+latest_price_cache = {}
+
+def get_history_func(symbol, tushare_token=None):
+    """用Tushare获取历史行情，返回DataFrame"""
+    if tushare_token is None:
+        raise ValueError("tushare_token未设置")
+    pro = ts.pro_api(tushare_token)
+    try:
+        df = pro.daily(ts_code=symbol, start_date='20240101', end_date='20991231')
+        if not df.empty:
+            df = df.sort_values('trade_date')
+            df['close'] = df['close'].astype(float)
+        return df
+    except Exception as e:
+        print(f"获取{symbol}历史行情失败: {e}")
+        return None
+
+def get_latest_price_func(symbol, xt_trader=None):
+    """优先用缓存，无则用xtdata.get_full_tick兜底获取最新价"""
+    price = latest_price_cache.get(symbol)
+    if price is not None:
+        return price
+    try:
+        from xtquant import xtdata
+        tick_info = xtdata.get_full_tick([symbol])
+        if symbol in tick_info and 'lastPrice' in tick_info[symbol]:
+            price = tick_info[symbol]['lastPrice']
+            latest_price_cache[symbol] = price
+            return price
+    except Exception as e:
+        print(f"xtdata获取{symbol}最新价失败: {e}")
+    return None
 
 # 策略模板示例
 class SimpleMAStrategy:
@@ -166,18 +205,21 @@ async def run_tornado_server():
         from modules.tornadoapp.app import app
         from modules.tornadoapp.db.dbUtil import init_beanie
         from modules.data_service.api.tornado_integration import add_data_handlers
-        loop = asyncio.get_event_loop()
         await init_beanie()
         add_data_handlers(app)
         http_server = tornado.httpserver.HTTPServer(app, max_body_size=1024 * 5)
         http_server.listen(8888)
         logger.info("Tornado 服务启动成功，监听端口: 8888")
-        await tornado.ioloop.IOLoop.current().start()
+        # 不要再调用 loop.start() 或 IOLoop.current().start()
     except Exception as e:
-        logger.error(f"Tornado 服务启动失败: {e}")
+        import traceback
+        logger.error(f"Tornado 服务启动失败: {e}\n{traceback.format_exc()}")
         raise
 
 async def auto_select_and_buy(xt_trader, acc, order_manager, top_n=10):
+    if not is_trading_time():
+        logger.info("[自动买入] 当前非交易时间，跳过本次自动买入。")
+        return
     try:
         from utils.environment_manager import get_env_manager
         env_manager = get_env_manager()
@@ -236,17 +278,16 @@ async def run_trader_system(path, account, environment='SIMULATION'):
         )
         scheduler.start()
         logger.info("数据下载调度器启动成功")
-        acc = StockAccount(account, 'STOCK')
+        acc = account
         session_id = int(time.time())
-        xt_trader = XtQuantTrader(path, session_id)
-        await asyncio.to_thread(xt_trader.start)
-        await asyncio.to_thread(xt_trader.connect)
+        xt_trader = XtQuantTrader(path, session_id, callback=None)
         risk_manager = RiskManager()
         compliance_manager = ComplianceManager()
         audit_logger = AuditLogger()
         order_manager = OrderManager(xt_trader, risk_manager, compliance_manager, audit_logger)
         callback = MyXtQuantTraderCallback(order_manager)
-        await asyncio.to_thread(xt_trader.register_callback, callback)
+        xt_trader.callback = callback  # 必须在这里赋值，保证后续异步下单安全
+        # 不再需要xt_trader.register_callback(callback)
         subscribe_result = await asyncio.to_thread(xt_trader.subscribe, acc)
         if subscribe_result == -1:
             logger.error("账户订阅失败，请重新打开QMT")
@@ -272,6 +313,10 @@ async def run_trader_system(path, account, environment='SIMULATION'):
         logger.info("策略管理API已集成到Tornado")
         async def daily_select_and_buy():
             while True:
+                if not is_trading_time():
+                    logger.info("[自动买入] 当前非交易时间，等待...")
+                    await asyncio.sleep(60)
+                    continue
                 await auto_select_and_buy(xt_trader, acc, order_manager, top_n=10)
                 await asyncio.sleep(86400)
         asyncio.create_task(daily_select_and_buy())
@@ -316,9 +361,52 @@ async def main_async():
     if args.mode == 'backtest':
         await run_multi_strategy_backtest()
     else:
-        path, account = await get_config(args.env)
+        path, account_id = await get_config(args.env)
+        # 初始化QMT交易API实例
+        session_id = int(time.time())
+        from xtquant.xttrader import XtQuantTrader
+        xt_trader = XtQuantTrader(path, session_id)
+        await asyncio.to_thread(xt_trader.start)
+        await asyncio.to_thread(xt_trader.connect)
+        # 获取tushare_token
+        from utils.environment_manager import get_env_manager
+        env_manager = get_env_manager()
+        tushare_token = env_manager.get_tushare_token()
+        # 构造StockAccount对象
+        account = StockAccount(account_id, 'STOCK')
+        # 初始化选股、分析等实例
+        stock_selector = StockSelector()
+        position_analyzer = PositionAnalyzer(tushare_token)
+        technical_analyzer = TechnicalAnalyzer()
+        # 初始化order_manager
+        from modules.tornadoapp.oms.order_manager import OrderManager
+        from modules.tornadoapp.risk.risk_manager import RiskManager
+        from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
+        from modules.tornadoapp.audit.audit_logger import AuditLogger
+        risk_manager = RiskManager()
+        compliance_manager = ComplianceManager()
+        audit_logger = AuditLogger()
+        order_manager = OrderManager(xt_trader, risk_manager, compliance_manager, audit_logger)
+        callback = MyXtQuantTraderCallback(order_manager)
+        xt_trader.callback = callback
+        # 启动自动买卖+持仓监控闭环任务（每60秒自动买卖+分析）
+        asyncio.create_task(
+            monitor_positions_and_trade(
+                stock_selector,
+                xt_trader,
+                account,
+                position_analyzer,
+                technical_analyzer,
+                lambda symbol: get_history_func(symbol, tushare_token),
+                lambda symbol: get_latest_price_func(symbol, xt_trader),
+                order_manager,
+                interval=60
+            )
+        )
         asyncio.create_task(trader_thread_func(path, account, args.env))
         await run_tornado_server()
+        while True:
+            await asyncio.sleep(36000)
 
 if __name__ == "__main__":
     asyncio.run(main_async())

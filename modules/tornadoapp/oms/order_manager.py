@@ -40,6 +40,7 @@ class OrderManager:
         return order
 
     def _send_order_to_broker(self, order):
+        assert self.xt_trader.callback is not None, "xt_trader.callback 必须已注册且不为None"
         account = order.account
         if order.side == "买":
             direction = xtconstant.STOCK_BUY

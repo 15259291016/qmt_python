@@ -18,7 +18,7 @@ from utils import config
 from utils.logger import logger
 from utils.polaris import get_node_list_by_name
 from utils.task_manager import async_task_manager
-from define.base.exception import BaseException
+from .exception import BaseException
 from define.enum.error import ErrorCode, ErrorMsg
 from define.stub.trpc_trpc_python_group_aigc import pb,rpc
 from define.stub.trpc_trpc_python_group_aigc_web.lip import rpc as lip_rpc

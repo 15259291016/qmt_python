@@ -5,14 +5,14 @@ from typing import Any, Union
 import pandas as pd
 from tornado.web import RequestHandler
 
-from define.base.exception import BaseException
-from define.base.exception import RequestException
-from define.enum.error import ErrorCode, ErrorMsg
-from define.enum.response_model import Status, Message
-from define.enum.staff_admin import RuleAction
-from utils.user_admin.models import AuthRuleAsync
-from define.base.ApiCode import ApiCode
-from utils.format import json_serial, CustomJSONEncoder
+from .exception import BaseException
+from .exception import RequestException
+from modules.tornadoapp.define.enum.error import ErrorCode, ErrorMsg
+from modules.tornadoapp.define.enum.response_model import Status, Message
+from modules.tornadoapp.define.enum.staff_admin import RuleAction
+# from utils.user_admin.models import AuthRuleAsync
+from .ApiCode import ApiCode
+from modules.tornadoapp.utils.format import json_serial, CustomJSONEncoder
 
 
 class BaseHandler(RequestHandler):

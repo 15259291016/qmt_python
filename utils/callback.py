@@ -69,13 +69,9 @@ class MyXtQuantTraderCallback(XtQuantTraderCallback):
         print(cancel_error.order_id, cancel_error.error_id, cancel_error.error_msg)
 
     def on_order_stock_async_response(self, response):
-        """
-        异步下单回报推送
-        :param response: XtOrderResponse 对象
-        :return:
-        """
-        print("on_order_stock_async_response")
-        print(response.account_id, response.order_id, response.seq)
+        print("on_order_stock_async_response", response)
+        # 你可以在这里处理异步下单回报，如更新订单状态等
+        pass
 
     def on_account_status(self, status):
         """
