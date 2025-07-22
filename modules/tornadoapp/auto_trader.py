@@ -65,9 +65,15 @@ async def auto_select_analyze_trade_monitor(
             print("[自动交易] 当前非交易时间，等待...")
             await asyncio.sleep(60)
             continue
-        # 1. 选股（可用pywencai或本地因子）
-        selected = stock_selector.select_by_wencai("市盈率小于10且银行行业，最新涨跌幅大于0，前10名")
-        # 或 selected = stock_selector.select(...)
+        # 1. 选股（自适应热点行业多因子选股）
+        try:
+            selected_codes = stock_selector.select_by_hot_industry()
+            print(f"热点行业选股结果: {selected_codes}")
+            # 兼容原有格式，转为dict列表
+            selected = [{"symbol": code} for code in selected_codes]
+        except Exception as e:
+            print(f"[选股] 热点行业选股失败: {e}，回退到原有条件选股")
+            selected = stock_selector.select_by_wencai("市盈率小于10且银行行业，最新涨跌幅大于0，前10名")
         print(f"选股结果: {selected}")
 
         # 2. QMT分析选出的股票（如技术指标、风控等）
@@ -153,6 +159,7 @@ async def monitor_positions_and_trade(
     持仓持续监控+自动买卖任务。
     - 买入信号：MA5上穿MA20且未持有
     - 卖出信号：MA5下穿MA20或止盈>10%或止损<-5%
+    - 集成恐贪指数决策（极端行情优化）
     """
     while True:
         if not is_trading_time():
@@ -163,28 +170,7 @@ async def monitor_positions_and_trade(
             positions = await asyncio.to_thread(xt_trader.query_stock_positions, account)
             valid_positions = [p for p in positions if hasattr(p, 'stock_code') and hasattr(p, 'volume')]
             held = {p.stock_code for p in valid_positions}
-            # 2. 自动卖出
-            for p in valid_positions:
-                symbol = p.stock_code
-                df = await asyncio.to_thread(get_history_func, symbol)
-                indicators = technical_analyzer.calculate_indicators(df)
-                current_price = get_latest_price_func(symbol)
-                if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
-                    await asyncio.to_thread(order_manager.create_order, symbol, "卖", current_price, p.volume, account)
-                    print(f"[自动卖出] {symbol} 价格: {current_price}")
-            # 3. 选股池自动买入
-            selected = stock_selector.select_by_wencai("市盈率小于10且银行行业，最新涨跌幅大于0，前10名")
-            for stock in selected:
-                symbol = stock['symbol']
-                if symbol not in held:
-                    df = await asyncio.to_thread(get_history_func, symbol)
-                    indicators = technical_analyzer.calculate_indicators(df)
-                    current_price = get_latest_price_func(symbol)
-                    if technical_analyzer.is_buy_signal(indicators):
-                        await asyncio.to_thread(order_manager.create_order, symbol, "买", current_price, 100, account)
-                        print(f"[自动买入] {symbol} 价格: {current_price}")
-            positions = await asyncio.to_thread(xt_trader.query_stock_positions, account)
-            valid_positions = [p for p in positions if hasattr(p, 'stock_code') and hasattr(p, 'volume')]
+            # 获取持仓分析，提取恐贪指数
             analysis = position_analyzer.analyze_positions([
                 {
                     "symbol": p.stock_code,
@@ -195,6 +181,90 @@ async def monitor_positions_and_trade(
                 }
                 for p in valid_positions
             ])
+            summary = analysis.summary
+            fear_greed_index = getattr(summary, 'fear_greed_index', 50)
+            long_term_fear_greed_index = getattr(summary, 'long_term_fear_greed_index', 50)
+            print(f"[恐贪指数] 当日: {fear_greed_index:.1f}，长期: {long_term_fear_greed_index:.1f}")
+            # 2. 自动卖出
+            for p in valid_positions:
+                symbol = p.stock_code
+                df = await asyncio.to_thread(get_history_func, symbol)
+                indicators = technical_analyzer.calculate_indicators(df)
+                current_price = get_latest_price_func(symbol)
+                # 极端恐慌下禁止卖出
+                if fear_greed_index < 10:
+                    print(f"[卖出决策] 极端恐慌({fear_greed_index:.1f})，禁止卖出 {symbol}，建议耐心等待情绪修复。")
+                    continue
+                # 恐慌区间仅允许止损卖出
+                if 10 <= fear_greed_index < 20:
+                    if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
+                        pnl = (current_price - p.avg_price) / p.avg_price * 100
+                        if pnl < -5:
+                            await asyncio.to_thread(order_manager.create_order, symbol, "卖", current_price, p.m_nCanUseVolume, account)
+                            print(f"[卖出决策] 恐慌区间({fear_greed_index:.1f})，仅允许止损卖出 {symbol} 价格: {current_price}")
+                        else:
+                            print(f"[卖出决策] 恐慌区间({fear_greed_index:.1f})，非止损不卖出 {symbol}")
+                    continue
+                # 极端贪婪下允许加大卖出
+                if fear_greed_index > 90 or long_term_fear_greed_index > 90:
+                    if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
+                        await asyncio.to_thread(order_manager.create_order, symbol, "卖", current_price, p.m_nCanUseVolume, account)
+                        print(f"[卖出决策] 极端贪婪({fear_greed_index:.1f})，加大卖出 {symbol} 价格: {current_price}，建议锁定收益。")
+                    continue
+                # 80-90区间正常卖出
+                if 80 < fear_greed_index <= 90 or 80 < long_term_fear_greed_index <= 90:
+                    if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
+                        await asyncio.to_thread(order_manager.create_order, symbol, "卖", current_price, p.m_nCanUseVolume, account)
+                        print(f"[卖出决策] 贪婪区间({fear_greed_index:.1f})，正常卖出 {symbol} 价格: {current_price}")
+                    continue
+                # 其它情况正常卖出
+                if p.m_nCanUseVolume != 0 and technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
+                    await asyncio.to_thread(order_manager.create_order, symbol, "卖", current_price, p.m_nCanUseVolume, account)
+                    print(f"[自动卖出] {symbol} 价格: {current_price}")
+            # 3. 选股池自动买入（自适应热点行业）
+            try:
+                selected_codes = stock_selector.select_by_hot_industry()
+                print(f"热点行业选股结果: {selected_codes}")
+                selected = [{"symbol": code} for code in selected_codes]
+            except Exception as e:
+                print(f"[选股] 热点行业选股失败: {e}，回退到原有条件选股")
+                selected = stock_selector.select_by_wencai("银行行业，市盈率TTM小于10，市净率小于1.2，净利润同比增长率大于5%，近3个月涨幅大于0，波动率小于5%，按净利润同比增长率降序排列，前10名")
+            for stock in selected:
+                symbol = stock['symbol']
+                if symbol not in held:
+                    df = await asyncio.to_thread(get_history_func, symbol)
+                    indicators = technical_analyzer.calculate_indicators(df)
+                    current_price = get_latest_price_func(symbol)
+                    # 极端恐慌下仅允许极小仓位买入
+                    if fear_greed_index < 10:
+                        print(f"[买入决策] 极端恐慌({fear_greed_index:.1f})，仅允许极小仓位买入 {symbol}，建议谨慎抄底。")
+                        await asyncio.to_thread(order_manager.create_order, symbol, "买", current_price, 20, account)
+                        continue
+                    # 恐慌区间允许小仓位买入
+                    if 10 <= fear_greed_index < 20:
+                        print(f"[买入决策] 恐慌区间({fear_greed_index:.1f})，仅允许小仓位买入 {symbol}，建议分批建仓。")
+                        await asyncio.to_thread(order_manager.create_order, symbol, "买", current_price, 50, account)
+                        continue
+                    # 极端贪婪下禁止买入
+                    if fear_greed_index > 90 or long_term_fear_greed_index > 90:
+                        print(f"[买入决策] 极端贪婪({fear_greed_index:.1f})，禁止买入 {symbol}，建议耐心等待回调。")
+                        continue
+                    # 贪婪区间仅允许小仓位买入
+                    if 80 < fear_greed_index <= 90 or 80 < long_term_fear_greed_index <= 90:
+                        print(f"[买入决策] 贪婪区间({fear_greed_index:.1f})，仅允许小仓位买入 {symbol}，建议谨慎追高。")
+                        await asyncio.to_thread(order_manager.create_order, symbol, "买", current_price, 50, account)
+                        continue
+                    # 恐慌区间加大买入
+                    if fear_greed_index < 30 and long_term_fear_greed_index < 40:
+                        print(f"[买入决策] 市场恐慌(当日{fear_greed_index:.1f}/长期{long_term_fear_greed_index:.1f})，允许加大买入 {symbol}")
+                        await asyncio.to_thread(order_manager.create_order, symbol, "买", current_price, 200, account)
+                        print(f"[自动买入-加大] {symbol} 价格: {current_price}")
+                        continue
+                    # 其它情况正常买入
+                    if technical_analyzer.is_buy_signal(indicators):
+                        await asyncio.to_thread(order_manager.create_order, symbol, "买", current_price, 100, account)
+                        print(f"[自动买入] {symbol} 价格: {current_price}")
+            # 持仓分析结果打印
             print("[持仓监控] 最新持仓分析:", analysis)
         except Exception as e:
             print(f"[持仓监控] 自动买卖/分析失败: {e}")

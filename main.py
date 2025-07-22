@@ -375,7 +375,7 @@ async def main_async():
         # 构造StockAccount对象
         account = StockAccount(account_id, 'STOCK')
         # 初始化选股、分析等实例
-        stock_selector = StockSelector()
+        stock_selector = StockSelector(tushare_token=tushare_token)
         position_analyzer = PositionAnalyzer(tushare_token)
         technical_analyzer = TechnicalAnalyzer()
         # 初始化order_manager

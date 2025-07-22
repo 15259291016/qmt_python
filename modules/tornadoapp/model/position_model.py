@@ -41,6 +41,8 @@ class PositionSummary:
     cash: float                    # 现金
     total_asset: float             # 总资产
     positions: List[Position]      # 持仓列表
+    fear_greed_index: Optional[float] = None  # 当日恐贪指数，0-100
+    long_term_fear_greed_index: Optional[float] = None  # 长期恐贪指数，0-100
 
 @dataclass
 class PositionRisk:

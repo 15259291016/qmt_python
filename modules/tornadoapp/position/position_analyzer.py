@@ -15,6 +15,7 @@ class PositionAnalyzer:
     
     def __init__(self, tushare_token: str):
         self.pro = ts.pro_api(tushare_token)
+        self.tushare_token = tushare_token # 新增：存储tushare_token
         
     def calculate_position_metrics(self, position: Position) -> Position:
         """计算单个持仓的指标"""
@@ -103,15 +104,101 @@ class PositionAnalyzer:
             recommendations=recommendations
         )
     
+    def calculate_fear_greed_index(self) -> float:
+        """基于全市场数据估算恐贪指数，0-100"""
+        try:
+            import tushare as ts
+            pro = ts.pro_api(self.tushare_token)
+            from datetime import datetime
+            today = datetime.now().strftime('%Y%m%d')
+            # 1. 涨跌家数
+            daily = pro.daily(trade_date=today)
+            up_count = (daily['pct_chg'] > 0).sum()
+            down_count = (daily['pct_chg'] < 0).sum()
+            total_count = len(daily)
+            up_ratio = up_count / total_count if total_count else 0.5
+            # 2. 涨停/跌停家数
+            limit_up_count = (daily['pct_chg'] > 9.5).sum()
+            limit_down_count = (daily['pct_chg'] < -9.5).sum()
+            limit_ratio = (limit_up_count - limit_down_count) / total_count if total_count else 0
+            # 3. 成交额（与近20日均值对比）
+            money = daily['amount'].sum() if 'amount' in daily.columns else 0
+            hist = pro.daily(trade_date=(datetime.now() - pd.Timedelta(days=20)).strftime('%Y%m%d'))
+            hist_money = hist['amount'].sum() if 'amount' in hist.columns else 1
+            money_ratio = money / hist_money if hist_money else 1
+            # 综合归一化（可根据实际调整权重）
+            idx = 50 + 30 * (up_ratio - 0.5) + 10 * limit_ratio + 10 * (money_ratio - 1)
+            idx = min(max(idx, 0), 100)
+            return idx
+        except Exception as e:
+            print(f"[恐贪指数] 全市场数据获取失败，使用持仓估算法: {e}")
+            return None
+
+    def calculate_long_term_fear_greed_index(self, window: int = 20) -> float:
+        """计算长期恐贪指数（近window日均值）"""
+        try:
+            import tushare as ts
+            pro = ts.pro_api(self.tushare_token)
+            from datetime import datetime, timedelta
+            today = datetime.now()
+            idx_list = []
+            for i in range(window):
+                day = today - timedelta(days=i)
+                trade_date = day.strftime('%Y%m%d')
+                daily = pro.daily(trade_date=trade_date)
+                if daily is None or daily.empty:
+                    continue
+                up_count = (daily['pct_chg'] > 0).sum()
+                down_count = (daily['pct_chg'] < 0).sum()
+                total_count = len(daily)
+                up_ratio = up_count / total_count if total_count else 0.5
+                limit_up_count = (daily['pct_chg'] > 9.5).sum()
+                limit_down_count = (daily['pct_chg'] < -9.5).sum()
+                limit_ratio = (limit_up_count - limit_down_count) / total_count if total_count else 0
+                money = daily['amount'].sum() if 'amount' in daily.columns else 0
+                # 近20日均值用前一日的成交额
+                if i < window - 1:
+                    hist = pro.daily(trade_date=(day - timedelta(days=1)).strftime('%Y%m%d'))
+                    hist_money = hist['amount'].sum() if hist is not None and 'amount' in hist.columns else 1
+                else:
+                    hist_money = 1
+                money_ratio = money / hist_money if hist_money else 1
+                idx = 50 + 30 * (up_ratio - 0.5) + 10 * limit_ratio + 10 * (money_ratio - 1)
+                idx = min(max(idx, 0), 100)
+                idx_list.append(idx)
+            if idx_list:
+                return float(np.mean(idx_list))
+            else:
+                return None
+        except Exception as e:
+            print(f"[长期恐贪指数] 获取失败: {e}")
+            return None
+
     def calculate_summary(self, positions: List[Position], cash: float) -> PositionSummary:
-        """计算持仓汇总"""
+        """计算持仓汇总，增加恐贪指数"""
         total_positions = len(positions)
         total_market_value = sum(p.market_value for p in positions)
         total_cost_value = sum(p.cost_value for p in positions)
         total_unrealized_pnl = sum(p.unrealized_pnl for p in positions)
         total_unrealized_pnl_pct = (total_unrealized_pnl / total_cost_value * 100) if total_cost_value > 0 else 0
         total_asset = total_market_value + cash
-        
+
+        # 优先用全市场恐贪指数
+        fear_greed_index = self.calculate_fear_greed_index()
+        # 长期恐贪指数
+        long_term_fear_greed_index = self.calculate_long_term_fear_greed_index(window=20)
+        if long_term_fear_greed_index is None:
+            long_term_fear_greed_index = fear_greed_index
+        # 若全市场不可用，回退到持仓估算
+        if fear_greed_index is None:
+            if positions:
+                avg_pnl = np.mean([p.unrealized_pnl_pct for p in positions])
+                pos_ratio = sum(1 for p in positions if p.unrealized_pnl_pct > 0) / len(positions)
+                fear_greed_index = min(max((avg_pnl + 10 * (pos_ratio - 0.5)) * 2 + 50, 0), 100)
+            else:
+                fear_greed_index = 50
+            long_term_fear_greed_index = fear_greed_index
+
         return PositionSummary(
             total_positions=total_positions,
             total_market_value=total_market_value,
@@ -120,7 +207,9 @@ class PositionAnalyzer:
             total_unrealized_pnl_pct=total_unrealized_pnl_pct,
             cash=cash,
             total_asset=total_asset,
-            positions=positions
+            positions=positions,
+            fear_greed_index=fear_greed_index,
+            long_term_fear_greed_index=long_term_fear_greed_index
         )
     
     def calculate_risk_metrics(self, positions: List[Position], summary: PositionSummary) -> PositionRisk:
@@ -210,8 +299,22 @@ class PositionAnalyzer:
         return metrics
     
     def generate_recommendations(self, positions: List[Position], risk: PositionRisk, summary: PositionSummary) -> List[str]:
-        """生成调整建议"""
+        """生成调整建议，加入恐贪指数分析"""
         recommendations = []
+        
+        # 恐贪指数分析（假设summary.fear_greed_index已赋值，范围0-100）
+        if hasattr(summary, 'fear_greed_index'):
+            idx = summary.fear_greed_index
+            if idx <= 20:
+                recommendations.append("当前市场极度恐慌，建议保持冷静，勿盲目割肉，可适当关注优质资产的低吸机会。")
+            elif idx <= 40:
+                recommendations.append("市场偏恐慌，操作宜谨慎，可逐步布局防御性板块。")
+            elif idx <= 60:
+                recommendations.append("市场情绪中性，建议按计划稳健操作，合理控制仓位。")
+            elif idx <= 80:
+                recommendations.append("市场偏贪婪，注意防范追高风险，适当锁定部分收益。")
+            else:
+                recommendations.append("市场极度贪婪，风险加大，建议逐步减仓，防止回撤。")
         
         # 基于集中度风险的建议
         if risk.concentration_risk > 0.2:
