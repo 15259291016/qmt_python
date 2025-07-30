@@ -11,7 +11,13 @@
 
 ## 主要功能
 
-### 1. 持仓分析模块
+### 1. 回测框架
+- **Backtrader 集成**: 使用成熟的 Backtrader 回测框架
+- **多策略支持**: 支持同时回测多个策略
+- **参数优化**: 自动参数优化和策略选择
+- **详细分析**: 完整的绩效分析和风险指标
+
+### 2. 持仓分析模块
 - **持仓查询**: 支持从XtQuant获取实时持仓数据
 - **风险分析**: 计算集中度风险、波动率风险、VaR等指标
 - **绩效评估**: 分析收益率、最大回撤、夏普比率等
@@ -44,6 +50,7 @@ pip install -r requirements.txt
 ```
 
 **重要依赖说明**:
+- `backtrader`: 回测框架
 - `tushare`: 金融数据接口
 - `talib-binary`: 技术分析库
 - `xtquant`: 迅投量化交易接口
@@ -85,6 +92,21 @@ python demo_position_analysis.py
 
 # XtQuant技术分析演示
 python demo_xtquant_analysis.py
+
+# Backtrader 回测演示
+python demo_backtrader_example.py
+
+# Backtrader 框架测试
+python test_backtrader_framework.py
+
+# 比亚迪策略回测演示
+python simple_byd_backtest.py
+
+# 比亚迪策略演示
+python demo_byd_strategy.py
+
+# 比亚迪策略简单测试
+python test_byd_simple.py
 ```
 
 ### 3. 访问API接口
@@ -125,7 +147,39 @@ analysis = analyzer.analyze_positions(positions_data, cash=50000)
 print(f"总收益率: {analysis.summary.total_unrealized_pnl_pct:.2f}%")
 ```
 
-### 2. 技术分析
+### 2. 回测分析
+
+```python
+from modules.backtrader_engine import BacktraderEngine, TushareDataFeed, MAStrategy
+
+# 创建回测引擎
+engine = BacktraderEngine(initial_cash=1000000, commission=0.001)
+
+# 添加数据源和策略
+data_feed = TushareDataFeed(symbol='000001.SZ', start_date='20230101', 
+                           end_date='20231231', tushare_token='your_token')
+engine.add_data(data_feed)
+engine.add_strategy(MAStrategy)
+
+# 运行回测
+result = engine.run_backtest()
+print(f"总收益率: {result.total_return:.2%}")
+print(f"夏普比率: {result.sharpe_ratio:.2f}")
+```
+
+### 3. 比亚迪策略回测
+
+```python
+from strategies.byd_strategy import BYDStrategy, BYDEnhancedStrategy, BYDConservativeStrategy
+
+# 运行比亚迪策略回测
+python simple_byd_backtest.py
+
+# 查看详细说明
+# 参考 BYD_STRATEGY_SUMMARY.md 文件
+```
+
+### 3. 技术分析
 
 ```python
 from modules.tornadoapp.position.xtquant_position_manager import XtQuantPositionManager

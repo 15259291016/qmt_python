@@ -135,17 +135,32 @@ class PositionAnalyzer:
             return None
 
     def calculate_long_term_fear_greed_index(self, window: int = 20) -> float:
-        """计算长期恐贪指数（近window日均值）"""
+        """
+        计算长期恐贪指数（近window日均值），批量获取历史数据，避免逐日API调用。
+        """
         try:
             import tushare as ts
             pro = ts.pro_api(self.tushare_token)
             from datetime import datetime, timedelta
+            import pandas as pd
+
             today = datetime.now()
+            start_date = (today - timedelta(days=window*2)).strftime('%Y%m%d')  # 多取几天防止节假日
+            end_date = today.strftime('%Y%m%d')
+            # 批量获取近window*2天的所有A股daily数据
+            daily_all = pro.daily(start_date=start_date, end_date=end_date)
+            if daily_all is None or daily_all.empty:
+                return None
+            # 只保留最近window个交易日
+            trade_dates = sorted(daily_all['trade_date'].unique(), reverse=True)[:window]
             idx_list = []
-            for i in range(window):
-                day = today - timedelta(days=i)
-                trade_date = day.strftime('%Y%m%d')
-                daily = pro.daily(trade_date=trade_date)
+            # 近window日均成交额
+            if 'amount' in daily_all.columns:
+                hist_money = daily_all[daily_all['trade_date'].isin(trade_dates)]['amount'].sum() / window
+            else:
+                hist_money = 1
+            for trade_date in trade_dates:
+                daily = daily_all[daily_all['trade_date'] == trade_date]
                 if daily is None or daily.empty:
                     continue
                 up_count = (daily['pct_chg'] > 0).sum()
@@ -156,12 +171,6 @@ class PositionAnalyzer:
                 limit_down_count = (daily['pct_chg'] < -9.5).sum()
                 limit_ratio = (limit_up_count - limit_down_count) / total_count if total_count else 0
                 money = daily['amount'].sum() if 'amount' in daily.columns else 0
-                # 近20日均值用前一日的成交额
-                if i < window - 1:
-                    hist = pro.daily(trade_date=(day - timedelta(days=1)).strftime('%Y%m%d'))
-                    hist_money = hist['amount'].sum() if hist is not None and 'amount' in hist.columns else 1
-                else:
-                    hist_money = 1
                 money_ratio = money / hist_money if hist_money else 1
                 idx = 50 + 30 * (up_ratio - 0.5) + 10 * limit_ratio + 10 * (money_ratio - 1)
                 idx = min(max(idx, 0), 100)

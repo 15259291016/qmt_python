@@ -15,11 +15,3 @@ def add_position_handlers(app):
         (r"/api/technical/signals", TradingSignalHandler),
         (r"/api/technical/indicators", IndicatorAnalysisHandler),
     ])
-    
-    print("持仓分析和技术分析API路由已注册:")
-    print("  GET/POST  /api/position/analysis     - 持仓分析")
-    print("  GET       /api/position/detail       - 持仓明细")
-    print("  GET       /api/position/report       - 持仓报告")
-    print("  GET/POST  /api/technical/analysis    - 技术分析")
-    print("  GET       /api/technical/signals     - 交易信号")
-    print("  GET       /api/technical/indicators  - 技术指标分析") 
