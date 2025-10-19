@@ -432,6 +432,97 @@ print(f"数据导出到: {csv_file}")
 - `database/market_data_manager.py` - 数据管理器源码
 - `database/market_data_schema.sql` - 数据库表结构
 
+## Git分支操作指南
+
+### 本地创建分支
+
+#### 1. 创建并切换到新分支
+```bash
+# 基于当前分支创建新分支
+git checkout -b feature/new-feature
+
+# 或者使用新的命令（Git 2.23+）
+git switch -c feature/new-feature
+
+# 基于指定分支创建新分支
+git checkout -b feature/new-feature main
+```
+
+#### 2. 推送分支到远程
+```bash
+# 首次推送新分支到远程，并设置上游跟踪
+git push -u origin feature/new-feature
+
+# 后续推送（已设置上游跟踪）
+git push
+```
+
+### 完整的分支工作流程
+
+```bash
+# 1. 确保在main分支上
+git checkout main
+
+# 2. 拉取最新代码
+git pull origin main
+
+# 3. 创建新分支
+git checkout -b feature/your-feature-name
+
+# 4. 进行开发工作
+# ... 编写代码 ...
+
+# 5. 提交更改
+git add .
+git commit -m "Add new feature"
+
+# 6. 推送分支到远程
+git push -u origin feature/your-feature-name
+
+# 7. 在GitHub上创建Pull Request
+# 8. 代码审查通过后合并到main分支
+```
+
+### 常用分支操作命令
+
+```bash
+# 查看分支
+git branch                    # 查看本地分支
+git branch -r                 # 查看远程分支
+git branch -a                 # 查看所有分支
+
+# 切换分支
+git checkout branch-name      # 切换到指定分支
+git switch branch-name        # 新命令，功能相同
+git checkout -                # 切换到上一个分支
+
+# 删除分支
+git branch -d branch-name     # 删除本地分支
+git push origin --delete branch-name  # 删除远程分支
+
+# 合并分支
+git checkout main
+git merge feature/branch-name
+git push origin main
+```
+
+### 分支命名规范
+
+- **功能分支**: `feature/功能描述`
+- **修复分支**: `bugfix/问题描述`
+- **热修复**: `hotfix/紧急修复`
+- **发布分支**: `release/版本号`
+- **开发分支**: `develop`
+
+### 最佳实践
+
+1. **从main分支创建功能分支**
+2. **在功能分支上开发**
+3. **定期同步main分支的更新**
+4. **完成功能后推送到远程**
+5. **创建Pull Request进行代码审查**
+6. **合并到main分支后删除功能分支**
+
 ## 许可证
 
 本项目仅供学习和研究使用，请勿用于商业用途。
