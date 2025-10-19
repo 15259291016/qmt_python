@@ -271,6 +271,167 @@ def generate_custom_signals(self, indicators: Dict, current_price: float) -> Dic
     return signals
 ```
 
+## 市场数据存储
+
+### 数据库设计
+
+本项目采用MySQL数据库，专门为记录市场数据而设计，为未来的量化AI模型准备数据。
+
+#### 数据库特性
+
+- **专注数据存储**: 简化设计，专注于市场数据存储和查询
+- **支持迅投数据**: 完整支持迅投的3秒级别tick数据、分钟级、日线数据
+- **AI友好**: 为机器学习模型提供便捷的数据访问接口
+- **高性能**: 优化的索引策略和查询性能
+- **易于维护**: 简单的表结构，清晰的数据管理
+
+#### 核心表结构
+
+##### 1. 股票基础信息
+- `stock_basic`: 股票基础信息表
+
+##### 2. 市场数据表
+- `tick_data`: 3秒级别tick数据
+- `minute_data`: 分钟级行情数据
+- `daily_data`: 日线行情数据
+- `adj_factor`: 复权因子表
+
+##### 3. 技术指标
+- `technical_indicators`: 技术指标表
+
+##### 4. 数据管理
+- `data_sync_status`: 数据同步状态表
+- `system_config`: 系统配置表
+
+#### 快速开始
+
+##### 1. 初始化数据库
+```bash
+# 一键初始化数据库
+python database/init_market_data.py --host localhost --user root --password your_password
+
+# 测试连接
+python database/init_market_data.py --test-only --host localhost --user root --password your_password
+```
+
+##### 2. 基本使用
+```python
+from database.market_data_manager import MarketDataManager
+
+# 创建数据管理器
+manager = MarketDataManager(
+    host='localhost',
+    port=3306,
+    user='market_data_app',
+    password='app_password',
+    database='market_data'
+)
+
+# 测试连接
+if manager.test_connection():
+    print("✅ 数据库连接成功！")
+```
+
+##### 3. 存储市场数据
+```python
+import pandas as pd
+
+# 存储股票基础信息
+stocks_data = pd.DataFrame({
+    'ts_code': ['000001.SZ', '000002.SZ', '600519.SH'],
+    'symbol': ['000001', '000002', '600519'],
+    'name': ['平安银行', '万科A', '贵州茅台'],
+    'industry': ['银行', '房地产', '食品饮料'],
+    'market': ['主板', '主板', '主板']
+})
+manager.insert_stock_basic(stocks_data)
+
+# 存储日线数据
+daily_data = pd.DataFrame({
+    'symbol': ['000001.SZ'],
+    'trade_date': ['2025-01-15'],
+    'open': [15.50], 'high': [15.80], 'low': [15.40], 'close': [15.70],
+    'volume': [1000000], 'amount': [15700000], 'pct_chg': [1.29]
+})
+manager.insert_daily_data(daily_data)
+
+# 存储tick数据
+tick_data = pd.DataFrame({
+    'symbol': ['000001.SZ'] * 100,
+    'tick_time': pd.date_range('2025-01-15 09:30:00', periods=100, freq='3S'),
+    'last_price': [15.50 + i * 0.01 for i in range(100)],
+    'volume': [1000] * 100,
+    'amount': [15500 + i * 10 for i in range(100)]
+})
+manager.insert_tick_data(tick_data)
+```
+
+##### 4. 查询市场数据
+```python
+# 获取股票列表
+stocks = manager.get_stock_list()
+print(f"股票总数: {len(stocks)}")
+
+# 获取日线数据
+daily_data = manager.get_daily_data('000001.SZ', '2025-01-01', '2025-01-15')
+print(f"日线数据条数: {len(daily_data)}")
+
+# 获取tick数据
+tick_data = manager.get_tick_data('000001.SZ', '2025-01-15 09:30:00', '2025-01-15 10:00:00')
+print(f"tick数据条数: {len(tick_data)}")
+
+# 获取最新价格
+latest_price = manager.get_latest_price('000001.SZ')
+print(f"平安银行最新价格: {latest_price}")
+```
+
+##### 5. 为AI模型准备数据
+```python
+# 获取训练数据
+def get_training_data(symbol, start_date, end_date):
+    """获取用于AI模型训练的数据"""
+    # 获取日线数据
+    daily_data = manager.get_daily_data(symbol, start_date, end_date)
+    
+    # 获取技术指标
+    indicators = manager.get_technical_indicators(symbol, start_date, end_date)
+    
+    # 合并数据
+    training_data = daily_data.merge(indicators, on=['symbol', 'trade_date'], how='left')
+    
+    # 计算特征
+    training_data['price_change'] = training_data['close'].pct_change()
+    training_data['volume_change'] = training_data['volume'].pct_change()
+    training_data['ma5_ma20_diff'] = training_data['ma5'] - training_data['ma20']
+    
+    return training_data
+
+# 获取训练数据
+training_data = get_training_data('000001.SZ', '2024-01-01', '2024-12-31')
+print(f"训练数据形状: {training_data.shape}")
+```
+
+#### 数据导出
+
+```python
+# 导出数据到CSV
+csv_file = manager.export_data_to_csv(
+    symbol='000001.SZ',
+    data_type='daily',
+    start_date='2025-01-01',
+    end_date='2025-01-15',
+    output_dir='data/export'
+)
+print(f"数据导出到: {csv_file}")
+```
+
+#### 详细使用指南
+
+更多详细的使用方法和示例，请参考：
+- `database/MARKET_DATA_GUIDE.md` - 完整使用指南
+- `database/market_data_manager.py` - 数据管理器源码
+- `database/market_data_schema.sql` - 数据库表结构
+
 ## 许可证
 
 本项目仅供学习和研究使用，请勿用于商业用途。
