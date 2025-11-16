@@ -6,6 +6,41 @@
     - 关键脚本：`main.py` 启动服务，`demo_*` 脚本展示单项能力，`simple_byd_backtest.py` 与 `demo_byd_strategy.py` 体现比亚迪策略流程。
     - 文档：务必跟进 `README.md`、`BYD_STRATEGY_SUMMARY.md`、`DATABASE_README.md`、`ENVIRONMENT_GUIDE.md` 等，确保更新与实现一致。
 
+    # Main Entry Point (main.py) 核心逻辑
+    ## 架构概览
+    - `main.py` 是系统核心入口，集成：Tornado Web服务（端口8888）、XtQuant实时交易、自动选股交易、多策略回测、持仓监控分析。
+    - 全局组件管理（模块级变量）：`stock_selector`、`position_analyzer`、`technical_analyzer`、`order_manager`、`xt_trader`、`account`、`tushare_token`、`scheduler`、`latest_price_cache`。
+
+    ## 执行流程 (main_async)
+    1. **参数解析**：`--env` (SIMULATION/PRODUCTION)、`--mode` (live/backtest)
+    2. **模式判断**：`backtest` → 运行回测 → 退出；`live` → 继续初始化
+    3. **环境配置**：`get_config()` 从 `Config.yaml` 加载交易环境（QMT路径、账户）
+    4. **XtQuant初始化**：创建 `XtQuantTrader` → 注册回调 → 连接并订阅账户 → 启动交易连接
+    5. **核心组件初始化**：`StockSelector`、`PositionAnalyzer`、`TechnicalAnalyzer`、`OrderManager`、`RiskManager`、`ComplianceManager`、`AuditLogger`
+    6. **调度器启动**：`APScheduler` 全局调度器，定时任务（每周一至周五15:40下载数据）
+    7. **数据库初始化**：`init_beanie()` 初始化 MongoDB/Beanie ODM
+    8. **Web服务启动**：`run_tornado_server()` 启动 Tornado HTTP 服务器（端口8888）
+    9. **自动交易任务**：`asyncio.create_task(monitor_positions_and_trade_multi_strategy())` 每60秒循环一次
+    10. **XtQuant消息循环**：`threading.Thread(xt_trader.run_forever)` 在独立线程运行，避免阻塞主循环
+    11. **主循环保活**：`await asyncio.Event().wait()` 永久等待，直到程序被中断
+
+    ## 关键模块职责
+    - `get_config()`：从 `Config.yaml` 加载交易环境配置（SIMULATION/PRODUCTION）
+    - `run_tornado_server()`：启动 Tornado Web 服务，提供 RESTful API（认证、权限、用户、持仓分析、技术分析、选股、风险、合规、审计）
+    - `run_trader_system()`：多策略量化交易核心逻辑，管理 XtQuant 连接和自动交易任务
+    - `monitor_positions_and_trade_multi_strategy()`：自动交易循环（每60秒），检查交易时间 → 查询持仓 → 持仓分析 → 计算恐贪指数 → 策略分配 → 技术分析 → 生成买卖信号 → 自动下单
+    - `run_multi_strategy_backtest()`：历史数据回测，支持多策略并行回测，输出收益率、夏普比率、最大回撤等指标
+    - `auto_select_and_buy()`：基于选股策略自动买入，调用 `SimpleStockSelector` 选股并批量下单
+    - `get_history_func()`：使用 Tushare Pro API 获取历史行情（返回 DataFrame）
+    - `get_latest_price_func()`：优先从缓存获取最新价格，缓存未命中时调用 `xtdata.get_full_tick()`
+
+    ## 设计要点
+    - 全局组件单例：核心服务实例在模块级全局变量中管理，避免重复创建
+    - 异步架构：使用 `asyncio` 处理并发任务，Tornado 异步处理 HTTP 请求
+    - 多线程隔离：XtQuant 消息循环在独立线程运行，避免阻塞主事件循环
+    - 模式切换：支持 `live`（实盘/模拟交易）和 `backtest`（历史回测）两种运行模式
+    - 配置管理：通过 `environment_manager` 统一管理环境配置，支持动态切换 SIMULATION/PRODUCTION
+
     # Workflow
     ## 启动阶段
     1. 接到任何需求，先重读根目录 `README.md` 与相关模块文档，确认当前功能、接口和运行方式。

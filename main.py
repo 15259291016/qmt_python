@@ -312,7 +312,7 @@ async def run_trader_system(path, account, environment='SIMULATION'):
                 interval=60
             )
         )
-        await run_tornado_server()
+        # await run_tornado_server()
         # 保活由main_async统一管理
     except Exception as e:
         logger.error(f"多策略量化交易系统启动失败: {e}")
