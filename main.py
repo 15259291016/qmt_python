@@ -298,9 +298,9 @@ async def run_trader_system(path, account, environment='SIMULATION'):
             if order:
                 order_callback_handler.record_order_params(order.order_id, params)
             return order
-        from modules.tornadoapp.auto_trader import monitor_positions_and_trade
+        from modules.tornadoapp.auto_trader import monitor_positions_and_trade_multi_strategy
         asyncio.create_task(
-            monitor_positions_and_trade(
+            monitor_positions_and_trade_multi_strategy(
                 stock_selector,
                 xt_trader,
                 account,

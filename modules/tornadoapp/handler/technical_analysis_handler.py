@@ -7,15 +7,14 @@ from tornado.web import RequestHandler
 from modules.tornadoapp.define.base.handler import BaseHandler
 from ..define.enum.response_model import Status, Message
 from ..position.xtquant_position_manager import XtQuantPositionManager
-import configs.ConfigServer as Cs
+import config.ConfigServer as Cs
 
 class TechnicalAnalysisHandler(BaseHandler):
     """技术分析处理器"""
     
     def __init__(self, application, request, **kwargs):
         super().__init__(application, request, **kwargs)
-        config_data = Cs.returnConfigData()
-        self.tushare_token = config_data.get("toshare_token", "")
+        self.tushare_token = Cs.getTushareToken()
         self.position_manager = XtQuantPositionManager(self.tushare_token)
     
     async def get(self):

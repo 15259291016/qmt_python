@@ -4,7 +4,9 @@ from xtquant.xttype import StockAccount
 from modules.stock_selector.selector import StockSelector
 from modules.tornadoapp.position.position_analyzer import PositionAnalyzer
 from utils.date_util import is_trading_time
-import time
+from modules.tornadoapp.risk.risk_manager import RiskManager
+from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
+from modules.tornadoapp.audit.audit_logger import AuditLogger
 
 # 假设你有如下实例
 # xt_trader: QMT交易API实例
@@ -145,6 +147,168 @@ async def monitor_positions_continuously(
             print(f"[持仓监控] 持仓分析失败: {e}")
         await asyncio.sleep(interval) 
 
+# 添加多策略自动交易函数
+async def monitor_positions_and_trade_multi_strategy(
+    stock_selector: StockSelector,
+    xt_trader,
+    account: StockAccount,
+    position_analyzer: PositionAnalyzer,
+    technical_analyzer: TechnicalAnalyzer,
+    get_history_func,
+    get_latest_price_func,
+    order_manager,
+    interval: int = 60
+):
+    """
+    多策略持仓监控+自动买卖任务。
+    支持多个策略并行运行，每个策略可以管理不同的股票池。
+    """
+    from modules.strategy_manager.manager import StrategyManager
+    from modules.strategy_manager.config import STRATEGY_CONFIG
+    
+    # 初始化策略管理器
+    risk_manager = RiskManager()
+    compliance_manager = ComplianceManager()
+    audit_logger = AuditLogger()
+    
+    strategy_manager = StrategyManager(
+        xt_trader=xt_trader,
+        order_manager=order_manager,
+        base_path="strategy_data"
+    )
+    
+    # 添加账户
+    strategy_manager.add_account("main_account", account)
+    
+    # 加载策略配置
+    strategy_manager.load_strategies_from_config(STRATEGY_CONFIG)
+    
+    # 智能策略分配函数
+    def assign_strategies_to_stocks(held_symbols, fear_greed_index):
+        """根据市场情绪和股票特性智能分配策略"""
+        if not held_symbols:
+            return {}
+        
+        # 根据恐贪指数调整策略分配
+        if fear_greed_index < 20:  # 恐慌市场
+            # 恐慌时使用保守策略
+            return {
+                "byd_conservative": held_symbols[:len(held_symbols)//2],
+                "ma_15_60": held_symbols[len(held_symbols)//2:]
+            }
+        elif fear_greed_index > 80:  # 贪婪市场
+            # 贪婪时使用增强策略
+            return {
+                "byd_enhanced": held_symbols[:len(held_symbols)//2],
+                "ma_5_20": held_symbols[len(held_symbols)//2:]
+            }
+        else:  # 正常市场
+            # 正常市场使用平衡策略
+            return {
+                "ma_5_20": held_symbols[:len(held_symbols)//3],
+                "ma_10_30": held_symbols[len(held_symbols)//3:2*len(held_symbols)//3],
+                "byd_strategy": held_symbols[2*len(held_symbols)//3:]
+            }
+    
+    # 启动所有策略
+    strategy_manager.start_all_strategies()
+    
+    last_status = None
+    while True:
+        trading = is_trading_time()
+        if not trading:
+            if last_status and last_status != 'not_trading':
+                print("[多策略自动交易] 当前非交易时间，等待...")
+                last_status = 'not_trading'
+            await asyncio.sleep(30)
+            continue
+        
+        last_status = 'trading'
+        try:
+            # 获取最新持仓分析
+            positions = xt_trader.query_stock_positions(account)
+            valid_positions = [p for p in positions if hasattr(p, 'stock_code') and hasattr(p, 'volume')]
+            
+            # 持仓分析
+            analysis = position_analyzer.analyze_positions([
+                {
+                    "symbol": p.stock_code,
+                    "volume": p.volume,
+                    "available_volume": getattr(p, 'enable_amount', p.volume),
+                    "avg_price": p.avg_price,
+                    "current_price": get_latest_price_func(p.stock_code)
+                }
+                for p in valid_positions
+            ])
+            
+            summary = analysis.summary
+            fear_greed_index = getattr(summary, 'fear_greed_index', 50)
+            long_term_fear_greed_index = getattr(summary, 'long_term_fear_greed_index', 50)
+            print(f"[恐贪指数] 当日: {fear_greed_index:.1f}，长期: {long_term_fear_greed_index:.1f}")
+            
+            # 智能策略分配
+            held_symbols = [p.stock_code for p in valid_positions]
+            strategy_assignments = assign_strategies_to_stocks(held_symbols, fear_greed_index)
+            
+            # 更新策略分配
+            for strategy_name, symbols in strategy_assignments.items():
+                if symbols:
+                    strategy_manager.assign_strategy_to_account(strategy_name, "main_account", symbols)
+                    print(f"[策略分配] {strategy_name} -> {symbols}")
+            
+            # 获取策略状态
+            strategy_status = strategy_manager.get_strategy_status()
+            print(f"[策略状态] {strategy_status}")
+            
+            # 选股池自动买入（自适应热点行业）
+            try:
+                selected_codes = stock_selector.select_by_hot_industry()
+                print(f"热点行业选股结果: {selected_codes}")
+                selected = [{"symbol": code} for code in selected_codes]
+            except Exception as e:
+                print(f"[选股] 热点行业选股失败: {e}，回退到原有条件选股")
+                selected = stock_selector.select_by_wencai("银行行业，市盈率TTM小于10，市净率小于1.2，净利润同比增长率大于5%，近3个月涨幅大于0，波动率小于5%，按净利润同比增长率降序排列，前10名")
+            
+            held = {p.stock_code for p in valid_positions}
+            
+            # 多策略买入逻辑
+            for stock in selected:
+                symbol = stock['symbol']
+                if symbol not in held:
+                    df = get_history_func(symbol)
+                    indicators = technical_analyzer.calculate_indicators(df)
+                    current_price = get_latest_price_func(symbol)
+                    min_amount = get_min_buy_amount(symbol)
+                    
+                    # 根据恐贪指数调整买入策略
+                    if fear_greed_index < 10:
+                        print(f"[多策略买入] 极端恐慌({fear_greed_index:.1f})，仅允许极小仓位买入 {symbol}")
+                        await order_manager(symbol, "买", current_price, min_amount, account)
+                    elif 10 <= fear_greed_index < 20:
+                        print(f"[多策略买入] 恐慌区间({fear_greed_index:.1f})，小仓位买入 {symbol}")
+                        await order_manager(symbol, "买", current_price, min_amount, account)
+                    elif fear_greed_index > 90 or long_term_fear_greed_index > 90:
+                        print(f"[多策略买入] 极端贪婪({fear_greed_index:.1f})，禁止买入 {symbol}")
+                        continue
+                    elif 80 < fear_greed_index <= 90 or 80 < long_term_fear_greed_index <= 90:
+                        print(f"[多策略买入] 贪婪区间({fear_greed_index:.1f})，小仓位买入 {symbol}")
+                        await order_manager(symbol, "买", current_price, min_amount, account)
+                    elif fear_greed_index < 30 and long_term_fear_greed_index < 40:
+                        print(f"[多策略买入] 市场恐慌，加大买入 {symbol}")
+                        await order_manager(symbol, "买", current_price, min_amount*2, account)
+                    elif technical_analyzer.is_buy_signal(indicators):
+                        print(f"[多策略买入] 正常买入 {symbol}")
+                        await order_manager(symbol, "买", current_price, min_amount, account)
+            
+            # 持仓分析结果打印
+            print("[多策略持仓监控] 最新持仓分析:", analysis)
+            
+        except Exception as e:
+            print(f"[多策略持仓监控] 自动买卖/分析失败: {e}")
+        
+        await asyncio.sleep(interval)
+
+# 保留原有的单策略函数作为备用
 async def monitor_positions_and_trade(
     stock_selector: StockSelector,
     xt_trader,
@@ -157,7 +321,7 @@ async def monitor_positions_and_trade(
     interval: int = 60
 ):
     """
-    持仓持续监控+自动买卖任务。
+    持仓持续监控+自动买卖任务（单策略版本）。
     - 买入信号：MA5上穿MA20且未持有
     - 卖出信号：MA5下穿MA20或止盈>10%或止损<-5%
     - 集成恐贪指数决策（极端行情优化）
@@ -169,7 +333,7 @@ async def monitor_positions_and_trade(
             if last_status and last_status != 'not_trading':
                 print("[自动交易] 当前非交易时间，等待...")
                 last_status = 'not_trading'
-            time.sleep(30)  # 非交易时段加长等待，减少刷屏
+            await asyncio.sleep(30)  # 非交易时段加长等待，减少刷屏
             continue
         last_status = 'trading'
         try:

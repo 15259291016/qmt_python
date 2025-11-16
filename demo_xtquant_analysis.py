@@ -13,7 +13,7 @@ XtQuant持仓分析演示脚本
 import asyncio
 import json
 from typing import List, Dict
-import configs.ConfigServer as Cs
+import config.ConfigServer as Cs
 
 from modules.tornadoapp.position.xtquant_position_manager import XtQuantPositionManager
 
@@ -64,8 +64,7 @@ async def demo_xtquant_analysis():
     print("=" * 60)
     
     # 获取配置
-    config_data = Cs.returnConfigData()
-    tushare_token = config_data.get("toshare_token", "")
+    tushare_token = Cs.getTushareToken()
     
     if not tushare_token:
         print("警告: 未找到Tushare token，将使用模拟数据")

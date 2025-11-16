@@ -13,7 +13,7 @@
 import asyncio
 import json
 from typing import List, Dict
-import configs.ConfigServer as Cs
+import config.ConfigServer as Cs
 
 from modules.tornadoapp.position.position_analyzer import PositionAnalyzer
 from modules.tornadoapp.position.position_visualizer import PositionVisualizer
@@ -73,8 +73,7 @@ async def demo_position_analysis():
     print("=" * 60)
     
     # 获取配置
-    config_data = Cs.returnConfigData()
-    tushare_token = config_data.get("toshare_token", "")
+    tushare_token = Cs.getTushareToken()
     
     if not tushare_token:
         print("警告: 未找到Tushare token，将使用模拟价格数据")

@@ -60,21 +60,35 @@ pip install -r requirements.txt
 
 ## 环境配置
 
-首次使用项目时，需要配置环境变量：
+首次使用项目时，需要完成两类配置：`.env` 环境变量和 `config/Config.yaml` 账户配置。
+
+### 1. .env 环境变量
 
 ```bash
 # 复制环境变量示例文件
 cp .env.example .env
 
-# 编辑.env文件，配置你的服务信息
-# 请根据.env.example中的示例，填入你的实际配置
+# 编辑 .env 文件，配置数据服务、数据库等运行所需的敏感信息
+# 例如：TUSHARE_TOKEN、MYSQL_HOST、MYSQL_USER、MYSQL_PASSWORD 等
 ```
 
-**重要配置项**:
-- `toshare_token`: Tushare API token
-- `xtquant_config`: XtQuant配置信息
+该文件由 `modules/data_service/config.py`、`utils/environment_manager.py` 等模块读取，用于：
+- `TUSHARE_TOKEN`：数据采集与指标计算使用
+- `MYSQL_*`：数据库连接
+- 其他第三方服务凭证
 
-**注意**: `.env` 文件包含敏感信息，不会被提交到Git仓库。请确保在 `.env` 文件中配置正确的服务参数。
+**注意**: `.env` 文件包含敏感信息，不会被提交到Git仓库。请确保只在本地维护。
+
+### 2. config/Config.yaml 交易环境
+
+`config/ConfigServer.py` 会读取此文件，为 Web/API、策略、演示脚本提供统一的交易环境配置。
+
+关键字段说明：
+- `SIMULATION` / `PRODUCTION`：分别配置仿真与实盘的 `QMT_PATH`、`ACCOUNT`、`NAME` 等信息
+- `toshare_token`：与 `.env` 中的 `TUSHARE_TOKEN` 保持一致，供 Tornado API、XtQuant 模块快速获取
+- `DATABASE`：当需要以 YAML 方式加载数据库配置时在此维护
+
+如需切换交易环境，只需更新 `Config.yaml` 并重新运行相关脚本/服务，无需再维护重复的 `configs/ConfigServer.py`。
 
 ## 快速开始
 

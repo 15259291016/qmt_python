@@ -6,11 +6,10 @@ Backtrader 策略基类
 
 import backtrader as bt
 import logging
-from typing import Dict, Any, Optional
-from abc import ABC, abstractmethod
+from typing import Dict, Any
 
 
-class BacktraderStrategyBase(bt.Strategy, ABC):
+class BacktraderStrategyBase(bt.Strategy):
     """Backtrader 策略基类"""
     
     def __init__(self, **kwargs):
@@ -75,15 +74,13 @@ class BacktraderStrategyBase(bt.Strategy, ABC):
                 self.sell()
                 self.log(f'卖出信号: {signal}')
     
-    @abstractmethod
     def generate_buy_signal(self, data) -> bool:
         """生成买入信号，子类必须实现"""
-        pass
+        raise NotImplementedError("子类必须实现 generate_buy_signal")
     
-    @abstractmethod
     def generate_sell_signal(self, data) -> bool:
         """生成卖出信号，子类必须实现"""
-        pass
+        raise NotImplementedError("子类必须实现 generate_sell_signal")
     
     def get_params(self) -> Dict[str, Any]:
         """获取策略参数"""

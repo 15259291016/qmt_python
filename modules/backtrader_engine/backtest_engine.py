@@ -75,8 +75,6 @@ class BacktraderEngine:
         self.cerebro = bt.Cerebro()
         self.cerebro.broker.setcash(initial_cash)
         self.cerebro.broker.setcommission(commission=commission)
-        self.cerebro.broker.setmargin(margin)
-        self.cerebro.broker.setmult(mult)
         
         # 添加分析器
         self._add_analyzers()

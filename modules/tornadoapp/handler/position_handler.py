@@ -8,15 +8,14 @@ from modules.tornadoapp.define.base.handler import BaseHandler
 from ..define.enum.response_model import Status, Message
 from ..model.position_model import PositionAnalysis
 from ..position.position_analyzer import PositionAnalyzer
-import configs.ConfigServer as Cs
+import config.ConfigServer as Cs
 
 class PositionAnalysisHandler(BaseHandler):
     """持仓分析处理器"""
     
     def __init__(self, application, request, **kwargs):
         super().__init__(application, request, **kwargs)
-        config_data = Cs.returnConfigData()
-        self.tushare_token = config_data.get("toshare_token", "")
+        self.tushare_token = Cs.getTushareToken()
         self.analyzer = PositionAnalyzer(self.tushare_token)
     
     async def get(self):
@@ -152,8 +151,7 @@ class PositionDetailHandler(BaseHandler):
     
     def __init__(self, application, request, **kwargs):
         super().__init__(application, request, **kwargs)
-        config_data = Cs.returnConfigData()
-        self.tushare_token = config_data.get("toshare_token", "")
+        self.tushare_token = Cs.getTushareToken()
         self.analyzer = PositionAnalyzer(self.tushare_token)
     
     async def get(self):

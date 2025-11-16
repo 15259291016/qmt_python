@@ -17,81 +17,45 @@ logger = logging.getLogger(__name__)
 
 class TushareDataFeed(bt.feeds.PandasData):
     """Tushare 数据源适配器"""
-    
-    def __init__(self, symbol: str, start_date: str, end_date: str, 
-                 tushare_token: str, **kwargs):
-        """
-        初始化 Tushare 数据源
-        
-        Args:
-            symbol: 股票代码 (如: '000001.SZ')
-            start_date: 开始日期 (格式: '20230101')
-            end_date: 结束日期 (格式: '20231231')
-            tushare_token: Tushare API token
-        """
-        self.symbol = symbol
-        self.start_date = start_date
-        self.end_date = end_date
-        self.tushare_token = tushare_token
-        
-        # 获取数据
-        df = self._fetch_data()
-        
-        # 转换为 Backtrader 格式
-        bt_df = self._convert_to_backtrader_format(df)
-        
-        super().__init__(dataname=bt_df, **kwargs)
-    
-    def _fetch_data(self) -> pd.DataFrame:
-        """获取 Tushare 数据"""
-        try:
-            pro = ts.pro_api(self.tushare_token)
-            df = pro.daily(
-                ts_code=self.symbol,
-                start_date=self.start_date,
-                end_date=self.end_date
-            )
-            
-            if df.empty:
-                raise ValueError(f"未获取到 {self.symbol} 的数据")
-            
-            # 按日期排序
-            df = df.sort_values('trade_date').reset_index(drop=True)
-            
-            logger.info(f"成功获取 {self.symbol} 数据: {len(df)} 条记录")
-            return df
-            
-        except Exception as e:
-            logger.error(f"获取 {self.symbol} 数据失败: {e}")
-            raise
-    
-    def _convert_to_backtrader_format(self, df: pd.DataFrame) -> pd.DataFrame:
-        """转换为 Backtrader 格式"""
-        # 重命名列
+    @classmethod
+    def from_tushare(cls, symbol, start_date, end_date, tushare_token, **kwargs):
+        df = cls._fetch_data_static(symbol, start_date, end_date, tushare_token)
+        bt_df = cls._convert_to_backtrader_format_static(df)
+        return cls(dataname=bt_df, **kwargs)
+
+    @staticmethod
+    def _fetch_data_static(symbol, start_date, end_date, tushare_token):
+        import tushare as ts
+        pro = ts.pro_api(tushare_token)
+        df = pro.daily(
+            ts_code=symbol,
+            start_date=start_date,
+            end_date=end_date
+        )
+        if df.empty:
+            raise ValueError(f"未获取到 {symbol} 的数据")
+        df = df.sort_values('trade_date').reset_index(drop=True)
+        return df
+
+    @staticmethod
+    def _convert_to_backtrader_format_static(df):
+        import pandas as pd
         column_mapping = {
             'trade_date': 'datetime',
             'open': 'open',
-            'high': 'high', 
+            'high': 'high',
             'low': 'low',
             'close': 'close',
             'vol': 'volume'
         }
-        
         bt_df = df.rename(columns=column_mapping)
-        
-        # 转换日期格式
         bt_df['datetime'] = pd.to_datetime(bt_df['datetime'])
         bt_df.set_index('datetime', inplace=True)
-        
-        # 确保数据类型正确
         numeric_columns = ['open', 'high', 'low', 'close', 'volume']
         for col in numeric_columns:
             if col in bt_df.columns:
                 bt_df[col] = pd.to_numeric(bt_df[col], errors='coerce')
-        
-        # 删除无效数据
         bt_df = bt_df.dropna()
-        
         return bt_df
 
 
@@ -208,7 +172,7 @@ class MultiSymbolDataFeed:
     def add_symbol(self, symbol: str, start_date: str, end_date: str) -> bt.feeds.PandasData:
         """添加股票数据源"""
         if self.data_source == 'tushare':
-            feed = TushareDataFeed(
+            feed = TushareDataFeed.from_tushare(
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,

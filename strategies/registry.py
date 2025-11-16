@@ -9,28 +9,48 @@ logger = logging.getLogger(__name__)
 
 class StrategyRegistry:
     """策略注册表"""
-    
     def __init__(self):
-        self._strategies: Dict[str, Type[BaseStrategy]] = {}
-    
-    def register_strategy(self, name: str, strategy_class: Type[BaseStrategy]):
+        self._strategies: Dict[str, Type] = {}
+        self._bt_strategies: Dict[str, Type] = {}
+        self._custom_strategies: Dict[str, Type] = {}
+
+    def register_strategy(self, name: str, strategy_class: Type):
         """注册策略"""
         self._strategies[name] = strategy_class
-        logger.info(f"策略 {name} 已注册")
-    
-    def get_strategy(self, name: str) -> Optional[Type[BaseStrategy]]:
-        """获取策略类"""
+        # 判断是否为Backtrader策略
+        import backtrader as bt
+        if issubclass(strategy_class, bt.Strategy):
+            self._bt_strategies[name] = strategy_class
+        else:
+            self._custom_strategies[name] = strategy_class
+        logger.info(f"策略 {name} 已注册，类型: {'Backtrader' if name in self._bt_strategies else '自定义'}")
+
+    def get_strategy(self, name: str) -> Optional[Type]:
         return self._strategies.get(name)
-    
+
+    def get_bt_strategy(self, name: str) -> Optional[Type]:
+        return self._bt_strategies.get(name)
+
+    def get_custom_strategy(self, name: str) -> Optional[Type]:
+        return self._custom_strategies.get(name)
+
     def list_strategies(self) -> list:
-        """列出所有已注册的策略"""
         return list(self._strategies.keys())
-    
+
+    def list_bt_strategies(self) -> list:
+        return list(self._bt_strategies.keys())
+
+    def list_custom_strategies(self) -> list:
+        return list(self._custom_strategies.keys())
+
     def unregister_strategy(self, name: str):
-        """注销策略"""
         if name in self._strategies:
             del self._strategies[name]
-            logger.info(f"策略 {name} 已注销")
+        if name in self._bt_strategies:
+            del self._bt_strategies[name]
+        if name in self._custom_strategies:
+            del self._custom_strategies[name]
+        logger.info(f"策略 {name} 已注销")
 
 
 # 全局策略注册表实例
