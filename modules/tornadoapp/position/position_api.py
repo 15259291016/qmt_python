@@ -1,5 +1,5 @@
-from modules.tornadoapp.handler.position_handler import PositionAnalysisHandler, PositionDetailHandler, PositionReportHandler
-from modules.tornadoapp.handler.technical_analysis_handler import TechnicalAnalysisHandler, TradingSignalHandler, IndicatorAnalysisHandler
+from modules.tornadoapp.controller.position_handler import PositionAnalysisHandler, PositionDetailHandler, PositionReportHandler
+from modules.tornadoapp.controller.technical_analysis_handler import TechnicalAnalysisHandler, TradingSignalHandler, IndicatorAnalysisHandler
 
 def add_position_handlers(app):
     """添加持仓分析和技术分析相关的路由"""

@@ -2,7 +2,7 @@ import json
 
 import tornado.web
 
-from modules.tornadoapp.handler.baseHandler import BaseHandler
+from modules.tornadoapp.controller.baseHandler import BaseHandler
 from modules.tornadoapp.model.demomodel import DemoModel
 from modules.tornadoapp.utils.response_model import try_except_async_request
 

@@ -8,42 +8,42 @@ import tornado.options
 import tornado.web
 import tornado.websocket
 
-from modules.tornadoapp.handler.mainHandler import MainHandler
-from modules.tornadoapp.handler.auth_handler import (
+from modules.tornadoapp.controller.mainHandler import MainHandler
+from modules.tornadoapp.controller.auth_handler import (
     RegisterHandler,
     LoginHandler,
     RefreshTokenHandler,
     LogoutHandler,
     ProfileHandler
 )
-from modules.tornadoapp.handler.permission_handler import (
+from modules.tornadoapp.controller.permission_handler import (
     RoleHandler,
     PermissionHandler,
     UserRoleHandler,
     UserPermissionHandler
 )
-from modules.tornadoapp.handler.user_handler import (
+from modules.tornadoapp.controller.user_handler import (
     UserHandler,
     UserRoleManagementHandler,
     UserStatsHandler
 )
-from modules.tornadoapp.handler.business_handler import (
+from modules.tornadoapp.controller.business_handler import (
     DataHandler,
     SystemHandler,
     UserManagementHandler,
     RoleBasedHandler,
     MixedPermissionHandler
 )
-from modules.tornadoapp.handler.subscribe_handler import SubscribeHandler
+from modules.tornadoapp.controller.subscribe_handler import SubscribeHandler
 from modules.tornadoapp.middleware.middleware_manager import create_app_with_middlewares
-from modules.tornadoapp.handler.super_admin_handler import SuperAdminHandler
+from modules.tornadoapp.controller.super_admin_handler import SuperAdminHandler
 from modules.tornadoapp.risk.risk_api import RiskConfigHandler, BlacklistHandler
 from modules.tornadoapp.compliance.compliance_api import ComplianceLogHandler, ComplianceExportHandler, ComplianceRuleHandler
 from modules.tornadoapp.audit.audit_api import AuditLogHandler, AuditExportHandler
 from modules.data_service.api.rest_api import BarDataAPI
 from modules.tornadoapp.position.position_api import add_position_handlers
 from modules.stock_selector.api import add_stock_selector_handlers
-from modules.tornadoapp.handler.swagger_handler import SwaggerUIHandler, OpenAPIHandler
+from modules.tornadoapp.controller.swagger_handler import SwaggerUIHandler, OpenAPIHandler
 
 
 # 定义路由
