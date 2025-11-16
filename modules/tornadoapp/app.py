@@ -43,12 +43,17 @@ from modules.tornadoapp.audit.audit_api import AuditLogHandler, AuditExportHandl
 from modules.data_service.api.rest_api import BarDataAPI
 from modules.tornadoapp.position.position_api import add_position_handlers
 from modules.stock_selector.api import add_stock_selector_handlers
+from modules.tornadoapp.handler.swagger_handler import SwaggerUIHandler, OpenAPIHandler
 
 
 # 定义路由
 routes = [
     # 主页面
     (r"/", MainHandler),
+    
+    # Swagger API 文档
+    (r"/api-docs", SwaggerUIHandler),
+    (r"/api-docs/swagger.json", OpenAPIHandler),
     
     # 用户认证相关路由
     (r"/api/auth/register", RegisterHandler),

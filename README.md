@@ -127,6 +127,14 @@ python test_byd_simple.py
 
 启动服务器后，可以访问以下API端点：
 
+#### API 文档 (Swagger)
+- `GET /api-docs` - Swagger UI 界面（交互式 API 文档）
+- `GET /api-docs/swagger.json` - OpenAPI 规范 JSON
+
+在浏览器中访问 `http://localhost:8888/api-docs` 即可查看完整的 API 文档。
+
+#### API端点列表
+
 #### 持仓分析API
 - `GET /api/position/analysis?account_id=demo` - 获取持仓分析
 - `GET /api/position/detail?account_id=demo` - 获取持仓明细
