@@ -74,3 +74,5 @@ webencodings==0.5.1
 websocket-client==1.9.0
 xlrd==2.0.2
 yarl==1.20.1
+scipy==1.16.3
+TA-Lib==0.6.8
