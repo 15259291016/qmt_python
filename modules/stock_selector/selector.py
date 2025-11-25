@@ -2,6 +2,8 @@ import pandas as pd
 from typing import List, Optional, Dict, Any
 import tushare as ts
 import numpy as np
+import pywencai as wc
+
 
 class HotIndustrySelector:
     """
@@ -107,11 +109,8 @@ class StockSelector:
 
     def select_by_wencai(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
         """用pywencai智能选股"""
-        try:
-            import pywencai
-        except ImportError:
-            raise RuntimeError("请先安装 pywencai: pip install pywencai")
-        df = pywencai.get(query = query)
+        df = wc.get(query = query)
+        
         if df is None or df.empty:
             return []
         code_col = 'code' if 'code' in df.columns else '股票代码'
