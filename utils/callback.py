@@ -17,6 +17,22 @@ class MyXtQuantTraderCallback(XtQuantTraderCallback):
     def __init__(self, order_manager: OrderManager, order_callback_handler=None):
         self.order_manager = order_manager
         self.order_callback_handler = order_callback_handler
+    
+    def on_order_error(self, order_error):
+        """
+        委托失败推送
+        :param order_error:XtOrderError 对象
+        :return:
+        """
+        print("on order_error callback")
+        failed_order_id = order_error.order_id
+        error_id = order_error.error_id
+        error_msg = order_error.error_msg
+        print(f"[委托失败] 订单ID: {failed_order_id}, 错误ID: {error_id}, 错误信息: {error_msg}")
+        
+        # 如果有order_callback_handler，调用其撤单逻辑
+        if self.order_callback_handler:
+            self.order_callback_handler.on_order_error(order_error)
 
     def on_disconnected(self):
         """
@@ -32,7 +48,8 @@ class MyXtQuantTraderCallback(XtQuantTraderCallback):
         :return:
         """
         print("on order callback:")
-        print(order.stock_code, order.order_status, order.order_sysid)
+        print(f"资金账号{order.account_id} 下单股票{order.stock_code} 订单状态{order.order_status} 订单系统ID{order.order_sysid}")
+        print(f"委托价格{order.price} 委托数量{order.m_nOrderVolume} 委托方向{order.direction} 委托时间{order.order_time}")
 
     def on_stock_asset(self, asset):
         """
@@ -60,15 +77,6 @@ class MyXtQuantTraderCallback(XtQuantTraderCallback):
         """
         print("on position callback")
         print(position.stock_code, position.volume)
-
-    def on_order_error(self, order_error):
-        """
-        委托失败推送
-        :param order_error:XtOrderError 对象
-        :return:
-        """
-        print("on order_error callback")
-        print(order_error.order_id, order_error.error_id, order_error.error_msg)
 
     def on_cancel_error(self, cancel_error):
         """
@@ -112,6 +120,9 @@ class OrderCallbackHandler:
         self.dingtalk_webhook = 'https://oapi.dingtalk.com/robot/send?access_token=你的token'  # TODO:替换为你的钉钉机器人
         self.order_params = {}       # 记录每个订单的原始下单参数
         self.order_manager = order_manager
+        # 订单历史记录：按股票代码记录订单列表（broker_order_id -> {'broker_order_id': str, 'symbol': str, 'timestamp': datetime}）
+        self.order_history = {}  # symbol -> [order_info, ...] 按时间顺序
+        self.broker_order_to_symbol = {}  # broker_order_id -> symbol 快速查找
 
     def record_order_params(self, order_id, params):
         self.order_params[order_id] = params
@@ -173,6 +184,25 @@ class OrderCallbackHandler:
             if order_id:
                 self.order_status_dict[order_id] = status
                 print(f"[订单状态] 订单{order_id} 状态更新为: {status}")
+                
+                # 记录订单历史（用于撤单功能）
+                if symbol and order_id:
+                    from datetime import datetime
+                    if symbol not in self.order_history:
+                        self.order_history[symbol] = []
+                    # 记录订单信息
+                    order_info = {
+                        'broker_order_id': order_id,
+                        'symbol': symbol,
+                        'timestamp': datetime.now(),
+                        'status': status
+                    }
+                    self.order_history[symbol].append(order_info)
+                    self.broker_order_to_symbol[order_id] = symbol
+                    # 只保留最近20个订单，避免内存占用过大
+                    if len(self.order_history[symbol]) > 20:
+                        old_order = self.order_history[symbol].pop(0)
+                        self.broker_order_to_symbol.pop(old_order['broker_order_id'], None)
 
             # 2. 成交回报处理
             if status in ['已成交', '部分成交']:
@@ -200,3 +230,90 @@ class OrderCallbackHandler:
         except Exception as e:
             logging.exception(f"[回调异常] 订单回报处理异常: {e}")
             self.notify_user(f"[回调异常] 订单回报处理异常: {e}")
+    
+    def on_order_error(self, order_error):
+        """
+        委托失败推送 - 自动撤上一个订单
+        :param order_error: XtOrderError 对象
+        :return:
+        """
+        failed_order_id = order_error.order_id
+        error_id = order_error.error_id
+        error_msg = order_error.error_msg
+        logging.warning(f"[委托失败] 订单ID: {failed_order_id}, 错误ID: {error_id}, 错误信息: {error_msg}")
+        print(f"[委托失败] 订单ID: {failed_order_id}, 错误ID: {error_id}, 错误信息: {error_msg}")
+        
+        # 尝试获取股票代码
+        symbol = None
+        # 方法1: 从broker_order_to_symbol查找
+        symbol = self.broker_order_to_symbol.get(failed_order_id)
+        
+        # 方法2: 从order_manager查找订单信息
+        if not symbol:
+            try:
+                # 通过broker_order_map查找本地订单
+                local_order_id = self.order_manager.broker_order_map.get(failed_order_id)
+                if local_order_id:
+                    order = self.order_manager.get_order(local_order_id)
+                    if order:
+                        symbol = order.symbol
+            except Exception as e:
+                logging.warning(f"[撤单] 查找订单信息失败: {e}")
+        
+        # 如果找到股票代码，尝试撤该股票的上一个订单
+        if symbol:
+            self._cancel_previous_order(symbol, failed_order_id)
+        else:
+            logging.warning(f"[撤单] 无法找到失败订单{failed_order_id}对应的股票代码，无法撤单")
+            print(f"[撤单] 无法找到失败订单{failed_order_id}对应的股票代码，无法撤单")
+    
+    def _cancel_previous_order(self, symbol, failed_order_id):
+        """
+        撤该股票的上一个订单
+        :param symbol: 股票代码
+        :param failed_order_id: 失败的订单ID（排除此订单）
+        """
+        try:
+            if symbol not in self.order_history or len(self.order_history[symbol]) < 2:
+                logging.info(f"[撤单] {symbol} 订单历史不足，无法撤单")
+                print(f"[撤单] {symbol} 订单历史不足，无法撤单")
+                return
+            
+            # 找到上一个订单（排除失败的订单）
+            orders = self.order_history[symbol]
+            previous_order = None
+            
+            # 从后往前查找，找到失败订单之前的最后一个有效订单
+            for i in range(len(orders) - 1, -1, -1):
+                order_info = orders[i]
+                broker_order_id = order_info['broker_order_id']
+                status = order_info.get('status', '')
+                
+                # 跳过失败的订单本身
+                if broker_order_id == failed_order_id:
+                    continue
+                
+                # 只撤未完全成交的订单（已报、部分成交）
+                if status in ['已报', '部分成交']:
+                    previous_order = order_info
+                    break
+            
+            if previous_order:
+                prev_order_id = previous_order['broker_order_id']
+                logging.info(f"[撤单] {symbol} 委托失败，撤上一个订单: {prev_order_id}")
+                print(f"[撤单] {symbol} 委托失败，撤上一个订单: {prev_order_id}")
+                
+                # 调用order_manager撤单
+                try:
+                    self.order_manager.cancel_order(prev_order_id, user="auto_cancel_on_error")
+                    logging.info(f"[撤单] {symbol} 已提交撤单请求: {prev_order_id}")
+                    print(f"[撤单] {symbol} 已提交撤单请求: {prev_order_id}")
+                except Exception as e:
+                    logging.error(f"[撤单] {symbol} 撤单失败: {e}")
+                    print(f"[撤单] {symbol} 撤单失败: {e}")
+            else:
+                logging.info(f"[撤单] {symbol} 未找到可撤的上一个订单")
+                print(f"[撤单] {symbol} 未找到可撤的上一个订单")
+        except Exception as e:
+            logging.exception(f"[撤单] 撤单处理异常: {e}")
+            print(f"[撤单] 撤单处理异常: {e}")

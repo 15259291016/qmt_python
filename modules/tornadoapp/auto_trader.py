@@ -373,7 +373,7 @@ async def monitor_positions_and_trade_multi_strategy(
             
             # 获取策略状态
             strategy_status = strategy_manager.get_strategy_status()
-            print(f"[策略状态] {strategy_status}")
+            # print(f"[策略状态] {strategy_status}")
             
             # 选股池自动买入（自适应热点行业）
             # 只在早上9:50-10:00执行问财选股，其他时间不选股
@@ -483,7 +483,7 @@ async def monitor_positions_and_trade_multi_strategy(
                             logger.info(f"[资金管理] 已达到最大持股数量限制({adjusted_max_stocks}只)，停止买入新股票")
                             break
             
-            # 多策略卖出逻辑：持仓股票低于20日均线卖出
+            # 多策略卖出逻辑：综合考虑止损止盈、技术指标、市场情绪等因素
             logger.info(f"开始检查持仓卖出信号，持仓数量: {len(valid_positions)}")
             for p in valid_positions:
                 symbol = p.stock_code
@@ -491,37 +491,161 @@ async def monitor_positions_and_trade_multi_strategy(
                     # 获取历史数据
                     df = get_history_func(symbol)
                     if df is None or len(df) < 20:
-                        logger.warning(f"{symbol}: 历史数据不足，无法计算20日均线，跳过卖出检查")
+                        logger.warning(f"{symbol}: 历史数据不足，无法计算技术指标，跳过卖出检查")
                         continue
                     
-                    # 计算技术指标（包含20日均线）
+                    # 计算技术指标
                     indicators = technical_analyzer.calculate_indicators(df)
-                    if not indicators or 'ma20' not in indicators:
-                        logger.warning(f"{symbol}: 无法计算20日均线，跳过卖出检查")
+                    if not indicators:
+                        logger.warning(f"{symbol}: 无法计算技术指标，跳过卖出检查")
                         continue
                     
-                    # 获取当前价格和20日均线
+                    # 获取当前价格和持仓信息
                     current_price = get_latest_price_func(symbol)
-                    ma20 = indicators['ma20']
+                    if current_price is None or current_price <= 0:
+                        logger.warning(f"{symbol}: 无法获取当前价格，跳过卖出检查")
+                        continue
                     
-                    # 获取可用持仓数量
+                    avg_price = getattr(p, 'avg_price', current_price)  # 成本价
                     available_volume = getattr(p, 'enable_amount', p.volume)
                     if available_volume <= 0:
                         logger.debug(f"{symbol}: 无可用持仓，跳过卖出检查")
                         continue
                     
-                    # 判断：当前价格 < 20日均线，则卖出
-                    price_diff_pct = ((current_price - ma20) / ma20 * 100) if ma20 > 0 else 0
+                    # 计算盈亏比例
+                    pnl_pct = ((current_price - avg_price) / avg_price * 100) if avg_price > 0 else 0
                     
-                    if current_price < ma20:
-                        logger.info(f"[多策略卖出] {symbol}: 当前价格({current_price:.2f}) < 20日均线({ma20:.2f})，价差={price_diff_pct:.2f}%，执行卖出")
-                        print(f"[多策略卖出] {symbol}: 价格={current_price:.2f}, MA20={ma20:.2f}, 价差={price_diff_pct:.2f}%, 持仓={available_volume}股")
+                    # 使用 IndicatorCalculator 计算更多技术指标
+                    from utils.indicator_calculator import IndicatorCalculator
+                    indicator_calc = IndicatorCalculator()
+                    
+                    # 计算RSI、MACD等指标
+                    try:
+                        rsi = indicator_calc.calculate(df, 'RSI')
+                        macd_result = indicator_calc.calculate(df, 'MACD')
+                        macd = macd_result['macd'] if isinstance(macd_result, dict) else None
+                        macd_signal = macd_result['signal'] if isinstance(macd_result, dict) else None
+                        macd_hist = macd_result['histogram'] if isinstance(macd_result, dict) else None
+                    except Exception as e:
+                        logger.debug(f"{symbol}: 计算技术指标失败: {e}，使用基础指标")
+                        rsi = None
+                        macd = None
+                        macd_signal = None
+                        macd_hist = None
+                    
+                    # 获取均线指标
+                    ma5 = indicators.get('ma5')
+                    ma20 = indicators.get('ma20')
+                    
+                    # 综合卖出信号判断
+                    sell_signals = []
+                    sell_reasons = []
+                    
+                    # 1. 止损：亏损超过5%
+                    if pnl_pct < -5:
+                        sell_signals.append(True)
+                        sell_reasons.append(f"止损(亏损{pnl_pct:.2f}%)")
+                    
+                    # 2. 止盈：盈利超过15%
+                    if pnl_pct > 15:
+                        sell_signals.append(True)
+                        sell_reasons.append(f"止盈(盈利{pnl_pct:.2f}%)")
+                    
+                    # 3. 均线死叉：MA5下穿MA20
+                    if ma5 and ma20 and ma5 < ma20:
+                        # 检查是否刚发生死叉（前一个周期MA5 >= MA20）
+                        if len(df) >= 2:
+                            prev_ma5 = df['close'].rolling(window=5).mean().iloc[-2]
+                            prev_ma20 = df['close'].rolling(window=20).mean().iloc[-2]
+                            if prev_ma5 >= prev_ma20:
+                                sell_signals.append(True)
+                                sell_reasons.append("均线死叉(MA5下穿MA20)")
+                    
+                    # 4. 价格跌破20日均线且偏离超过2%
+                    if ma20 and current_price < ma20:
+                        price_diff_pct = ((current_price - ma20) / ma20 * 100) if ma20 > 0 else 0
+                        if price_diff_pct < -2:  # 低于MA20超过2%
+                            sell_signals.append(True)
+                            sell_reasons.append(f"跌破MA20(偏离{price_diff_pct:.2f}%)")
+                    
+                    # 5. RSI超买：RSI > 70
+                    if rsi and rsi > 70:
+                        sell_signals.append(True)
+                        sell_reasons.append(f"RSI超买({rsi:.2f})")
+                    
+                    # 6. MACD死叉：MACD下穿信号线
+                    if macd is not None and macd_signal is not None:
+                        # 检查是否刚发生死叉
+                        try:
+                            prev_macd = indicator_calc.calculate(df.iloc[:-1], 'MACD_DIF')
+                            prev_signal = indicator_calc.calculate(df.iloc[:-1], 'MACD_DEA')
+                            if isinstance(prev_macd, (int, float)) and isinstance(prev_signal, (int, float)):
+                                if macd < macd_signal and prev_macd >= prev_signal:
+                                    sell_signals.append(True)
+                                    sell_reasons.append("MACD死叉")
+                        except:
+                            pass
+                    
+                    # 7. MACD柱状图转负且持续扩大
+                    if macd_hist is not None and macd_hist < 0:
+                        sell_signals.append(True)
+                        sell_reasons.append(f"MACD柱状图转负({macd_hist:.4f})")
+                    
+                    # 8. 市场情绪：极端贪婪时考虑止盈卖出
+                    if fear_greed_index > 80 and pnl_pct > 5:
+                        sell_signals.append(True)
+                        sell_reasons.append(f"市场贪婪(恐贪指数{fear_greed_index:.1f})且盈利{pnl_pct:.2f}%")
+                    
+                    # 9. 恐慌市场：非止损情况下不卖出（除非亏损严重）
+                    if fear_greed_index < 20:
+                        if pnl_pct >= -3:  # 亏损小于3%，过滤掉非止损信号
+                            # 只保留止损信号
+                            filtered_signals = []
+                            filtered_reasons = []
+                            for i, reason in enumerate(sell_reasons):
+                                if '止损' in reason:
+                                    filtered_signals.append(sell_signals[i])
+                                    filtered_reasons.append(reason)
+                            sell_signals = filtered_signals
+                            sell_reasons = filtered_reasons
+                            if not sell_signals:
+                                sell_reasons.append(f"恐慌市场(恐贪指数{fear_greed_index:.1f})，非止损不卖出")
+                    
+                    # 综合判断：满足任一卖出条件即可卖出
+                    should_sell = any(sell_signals) if sell_signals else False
+                    
+                    if should_sell:
+                        reason_str = "、".join(sell_reasons)
+                        logger.info(f"[多策略卖出] {symbol}: 触发卖出信号 - {reason_str}")
+                        # 格式化指标值，处理None情况
+                        ma5_str = f"{ma5:.2f}" if ma5 is not None else "N/A"
+                        ma20_str = f"{ma20:.2f}" if ma20 is not None else "N/A"
+                        rsi_str = f"{rsi:.2f}" if rsi is not None else "N/A"
+                        logger.info(f"[多策略卖出] {symbol}: 价格={current_price:.2f}, 成本={avg_price:.2f}, 盈亏={pnl_pct:.2f}%, "
+                                   f"MA5={ma5_str}, MA20={ma20_str}, "
+                                   f"RSI={rsi_str}, 持仓={available_volume}股")
+                        print(f"[多策略卖出] {symbol}: {reason_str}")
+                        print(f"  价格={current_price:.2f}, 成本={avg_price:.2f}, 盈亏={pnl_pct:.2f}%, "
+                              f"MA5={ma5_str}, MA20={ma20_str}, "
+                              f"RSI={rsi_str}")
                         
                         # 执行卖出：卖出全部可用持仓
                         await order_manager(symbol, "卖", current_price, available_volume, account)
                         logger.info(f"[多策略卖出] {symbol}: 已提交卖出订单，数量={available_volume}股，价格={current_price:.2f}")
                     else:
-                        logger.debug(f"[多策略卖出] {symbol}: 当前价格({current_price:.2f}) >= 20日均线({ma20:.2f})，价差={price_diff_pct:.2f}%，继续持有")
+                        # 记录持有原因
+                        hold_reasons = []
+                        if pnl_pct >= -5 and pnl_pct <= 15:
+                            hold_reasons.append(f"盈亏正常({pnl_pct:.2f}%)")
+                        if ma5 and ma20 and ma5 >= ma20:
+                            hold_reasons.append("均线多头排列")
+                        if rsi and rsi <= 70:
+                            hold_reasons.append(f"RSI未超买({rsi:.2f})")
+                        if fear_greed_index < 20 and pnl_pct < -3:
+                            hold_reasons.append(f"恐慌市场但亏损未达止损线")
+                        
+                        if hold_reasons:
+                            logger.debug(f"[多策略卖出] {symbol}: 继续持有 - {'、'.join(hold_reasons)}")
                         
                 except Exception as e:
                     logger.error(f"[多策略卖出] {symbol}: 卖出检查失败: {e}", exc_info=True)
@@ -640,7 +764,7 @@ async def monitor_positions_and_trade(
                         current_price=current_price,
                         max_position_ratio=0.1,  # 单只股票最大10%仓位（风险分散原则）
                         min_position_value=10000.0,  # 最小持仓10000元（控制交易成本占比<1%）
-                        max_position_value=80000.0  # 最大持仓80000元（单只股票风险上限）
+                        max_position_value=800000.0  # 最大持仓80000元（单只股票风险上限）
                     )
                     # 极端恐慌下仅允许极小仓位买入
                     if fear_greed_index < 10:

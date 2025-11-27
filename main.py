@@ -1,9 +1,8 @@
 # coding=utf-8
 import asyncio
 import logging
-import time
 import pandas as pd
-import random
+import threading
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import tushare as ts
@@ -104,84 +103,6 @@ class SimpleMAStrategy:
         else:
             return 0
 
-# 多策略回测示例
-async def run_multi_strategy_backtest():
-    """运行多策略回测"""
-    try:
-        logger.info("开始多策略回测...")
-        dates = pd.date_range('2023-01-01', '2023-03-01')
-        symbols = ['000001.SZ', '000002.SZ', '000858.SZ', '002415.SZ', '600036.SH']
-        data = []
-        for symbol in symbols:
-            price = 10 + random.random() * 10
-            for dt in dates:
-                price += random.uniform(-0.2, 0.2)
-                data.append({
-                    'datetime': dt, 
-                    'symbol': symbol, 
-                    'open': price, 
-                    'high': price + 0.1, 
-                    'low': price - 0.1, 
-                    'close': price, 
-                    'volume': random.randint(1000, 10000)
-                })
-        df = pd.DataFrame(data)
-        logger.info(f"生成模拟数据: {len(df)} 条记录，{len(symbols)} 个品种")
-        from modules.strategy_manager.manager import StrategyManager
-        from modules.tornadoapp.oms.order_manager import OrderManager
-        from modules.tornadoapp.risk.risk_manager import RiskManager
-        from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
-        from modules.tornadoapp.audit.audit_logger import AuditLogger
-        class MockXtTrader:
-            async def query_stock_positions(self, account):
-                return []
-        mock_trader = MockXtTrader()
-        risk_manager = RiskManager()
-        compliance_manager = ComplianceManager()
-        audit_logger = AuditLogger()
-        order_manager = OrderManager(mock_trader, risk_manager, compliance_manager, audit_logger)
-        strategy_manager = StrategyManager(
-            xt_trader=mock_trader,
-            order_manager=order_manager,
-            base_path="backtest_data"
-        )
-        strategy_manager.add_account("backtest_account", None)
-        for symbol in symbols:
-            strategy_manager.add_symbol(symbol)
-        strategy_manager.load_strategies_from_config()
-        strategy_manager.assign_strategy_to_account("ma_5_20", "backtest_account", ["000001.SZ", "000002.SZ"])
-        strategy_manager.assign_strategy_to_account("ma_10_30", "backtest_account", ["000858.SZ", "002415.SZ", "600036.SH"])
-        from modules.strategy_manager.backtest_engine import BacktestEngine as StrategyBacktestEngine
-        backtest_engine = StrategyBacktestEngine(
-            strategy_manager=strategy_manager,
-            data=df,
-            initial_capital=1000000,
-            commission_rate=0.0003,
-            slippage=0.001
-        )
-        results = await backtest_engine.run_backtest(
-            start_date=pd.Timestamp('2023-01-01'),
-            end_date=pd.Timestamp('2023-03-01')
-        )
-        logger.info("回测完成，结果如下:")
-        for strategy_name, result in results.items():
-            logger.info(f"策略: {strategy_name}")
-            logger.info(f"  总收益率: {result.total_return:.2%}")
-            logger.info(f"  年化收益率: {result.annual_return:.2%}")
-            logger.info(f"  夏普比率: {result.sharpe_ratio:.2f}")
-            logger.info(f"  最大回撤: {result.max_drawdown:.2%}")
-            logger.info(f"  胜率: {result.win_rate:.2%}")
-            logger.info(f"  总交易次数: {result.total_trades}")
-            logger.info("")
-        report = await backtest_engine.generate_report()
-        logger.info("回测报告:")
-        logger.info(report)
-        await backtest_engine.save_results()
-        logger.info("多策略回测完成")
-    except Exception as e:
-        logger.error(f"多策略回测失败: {e}")
-        import traceback
-        traceback.print_exc()
 
 # 配置日志
 logging.basicConfig(
@@ -330,24 +251,22 @@ async def trader_thread_func(path, account, environment):
 
 
 async def main_async():
-    import argparse
-    parser = argparse.ArgumentParser(description='多策略量化交易平台')
-    parser.add_argument('--env', '--environment', 
-                       choices=['SIMULATION', 'PRODUCTION'], 
-                       default='SIMULATION',
-                       help='运行环境 (SIMULATION: 模拟环境, PRODUCTION: 实盘环境)')
-    parser.add_argument('--mode', '--run-mode',
-                       choices=['live', 'backtest'],
-                       default='live',
-                       help='运行模式 (live: 实盘/模拟交易, backtest: 回测)')
-    args = parser.parse_args()
-    logger.info(f"程序启动中... 环境: {args.env}, 模式: {args.mode}")
+    """主函数：启动多策略量化交易平台"""
+    # 默认使用模拟环境
+    environment = 'SIMULATION'
+    logger.info(f"程序启动中... 环境: {environment}")
     global stock_selector, position_analyzer, technical_analyzer, order_manager, order_callback_handler, callback, tushare_token, xt_trader, account
-    if args.mode == 'backtest':
-        await run_multi_strategy_backtest()
-        return
-    # --- 初始化所有依赖对象 ---
-    path, account_id = await get_config(args.env)
+    # --- 启动全局调度器（只启动一次） ---
+    setup_scheduler()  # 只添加任务
+    scheduler.start()
+    logger.info("APScheduler全局调度器已启动")
+    # --- 初始化数据库 ---
+    await init_beanie()
+    logger.info("数据库初始化完成")
+    # --- 启动自动化任务 ---
+    await run_tornado_server()
+    # --- 初始化XtQuantTrader ---
+    path, account_id = await get_config(environment)
     account = StockAccount(account_id, 'STOCK')
     session_id = 123456
     from utils.callback import OrderCallbackHandler, MyXtQuantTraderCallback
@@ -379,20 +298,10 @@ async def main_async():
     position_analyzer = PositionAnalyzer(tushare_token)
     technical_analyzer = TechnicalAnalyzer()
     
-    # --- 启动全局调度器（只启动一次） ---
-    setup_scheduler()  # 只添加任务
-    scheduler.start()
-    logger.info("APScheduler全局调度器已启动")
-    # --- 初始化数据库 ---
-    await init_beanie()
-    logger.info("数据库初始化完成")
-    # --- 启动自动化任务 ---
-    await run_tornado_server()
     # 只启动一次交易系统（包含自动交易任务）
-    asyncio.create_task(trader_thread_func(path, account, args.env))
+    asyncio.create_task(trader_thread_func(path, account, environment))
     
     # 启动QMT交易连接的消息循环（在独立线程中）
-    import threading
     def run_xt_trader_forever():
         try:
             logger.info("QMT交易连接消息循环启动中...")
