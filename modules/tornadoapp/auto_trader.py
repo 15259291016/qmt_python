@@ -962,10 +962,20 @@ async def monitor_positions_and_trade_multi_strategy(
                         continue
                     
                     avg_price = getattr(p, 'avg_price', current_price)  # 成本价
-                    available_volume = getattr(p, 'enable_amount', p.volume)
+                    total_volume = p.volume  # 总持仓
+                    available_volume = getattr(p, 'enable_amount', p.volume)  # 可用持仓（已考虑T+1规则）
+                    
+                    # T+1规则检查：当日买入的股票不能当日卖出
                     if available_volume <= 0:
-                        logger.debug(f"{symbol}: 无可用持仓，跳过卖出检查")
+                        logger.info(f"{symbol}: 无可用持仓（T+1限制：当日买入的股票不能当日卖出），总持仓={total_volume}股，可用持仓=0股，跳过卖出检查")
+                        print(f"[T+1限制] {symbol}: 当日买入的股票不能当日卖出，总持仓={total_volume}股，可用持仓=0股")
                         continue
+                    
+                    # 如果可用持仓小于总持仓，说明有部分持仓是当日买入的
+                    if available_volume < total_volume:
+                        locked_volume = total_volume - available_volume
+                        logger.info(f"{symbol}: 部分持仓受T+1限制，总持仓={total_volume}股，可用持仓={available_volume}股，锁定持仓={locked_volume}股（当日买入）")
+                        print(f"[T+1限制] {symbol}: 部分持仓受T+1限制，只能卖出{available_volume}股（总持仓{total_volume}股，当日买入{locked_volume}股）")
                     
                     # 计算盈亏比例
                     pnl_pct = ((current_price - avg_price) / avg_price * 100) if avg_price > 0 else 0
@@ -1086,9 +1096,14 @@ async def monitor_positions_and_trade_multi_strategy(
                               f"MA5={ma5_str}, MA20={ma20_str}, "
                               f"RSI={rsi_str}")
                         
-                        # 执行卖出：卖出全部可用持仓
-                        await order_manager(symbol, "卖", current_price, available_volume, account)
-                        logger.info(f"[多策略卖出] {symbol}: 已提交卖出订单，数量={available_volume}股，价格={current_price:.2f}")
+                        # 执行卖出：只卖出可用持仓（已考虑T+1规则）
+                        # 注意：available_volume 已经由券商计算，排除了当日买入的股票
+                        if available_volume > 0:
+                            await order_manager(symbol, "卖", current_price, available_volume, account)
+                            logger.info(f"[多策略卖出] {symbol}: 已提交卖出订单，数量={available_volume}股（总持仓{total_volume}股），价格={current_price:.2f}")
+                        else:
+                            logger.warning(f"[多策略卖出] {symbol}: 无可用持仓（T+1限制），无法卖出")
+                            print(f"[T+1限制] {symbol}: 当日买入的股票不能当日卖出，无法执行卖出订单")
                     else:
                         # 记录持有原因
                         hold_reasons = []
