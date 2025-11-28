@@ -4,11 +4,14 @@ from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import tushare as ts
 from scipy import stats
+import logging
 
 from ..model.position_model import (
     Position, PositionSummary, PositionRisk, PositionAnalysis, 
     PositionType, RiskLevel
 )
+
+logger = logging.getLogger(__name__)
 
 class PositionAnalyzer:
     """持仓分析器"""
@@ -109,28 +112,75 @@ class PositionAnalyzer:
         try:
             import tushare as ts
             pro = ts.pro_api(self.tushare_token)
-            from datetime import datetime
-            today = datetime.now().strftime('%Y%m%d')
+            from datetime import datetime, timedelta
+            import pandas as pd
+            
+            today = datetime.now()
+            today_str = today.strftime('%Y%m%d')
+            
+            # 获取当天数据
+            daily = pro.daily(trade_date=today_str)
+            if daily is None or daily.empty:
+                logger.warning(f"[恐贪指数] 当天数据为空，日期: {today_str}")
+                return None
+            
             # 1. 涨跌家数
-            daily = pro.daily(trade_date=today)
             up_count = (daily['pct_chg'] > 0).sum()
             down_count = (daily['pct_chg'] < 0).sum()
             total_count = len(daily)
-            up_ratio = up_count / total_count if total_count else 0.5
-            # 2. 涨停/跌停家数
+            if total_count == 0:
+                return None
+            up_ratio = up_count / total_count
+            
+            # 2. 涨停/跌停家数（归一化到-1到1）
             limit_up_count = (daily['pct_chg'] > 9.5).sum()
             limit_down_count = (daily['pct_chg'] < -9.5).sum()
-            limit_ratio = (limit_up_count - limit_down_count) / total_count if total_count else 0
+            # 归一化：假设极端情况下涨停/跌停最多占总数的10%
+            max_limit_ratio = 0.1
+            limit_ratio = (limit_up_count - limit_down_count) / (total_count * max_limit_ratio) if total_count > 0 else 0
+            limit_ratio = max(min(limit_ratio, 1.0), -1.0)  # 限制在-1到1之间
+            
             # 3. 成交额（与近20日均值对比）
             money = daily['amount'].sum() if 'amount' in daily.columns else 0
-            hist = pro.daily(trade_date=(datetime.now() - pd.Timedelta(days=20)).strftime('%Y%m%d'))
-            hist_money = hist['amount'].sum() if 'amount' in hist.columns else 1
-            money_ratio = money / hist_money if hist_money else 1
-            # 综合归一化（可根据实际调整权重）
-            idx = 50 + 30 * (up_ratio - 0.5) + 10 * limit_ratio + 10 * (money_ratio - 1)
+            if money <= 0:
+                logger.warning(f"[恐贪指数] 当天成交额为0或无法获取")
+                return None
+            
+            # 获取近20天的历史数据计算平均值
+            start_date = (today - timedelta(days=30)).strftime('%Y%m%d')  # 多取几天防止节假日
+            end_date = (today - timedelta(days=1)).strftime('%Y%m%d')  # 不包含今天
+            hist_daily = pro.daily(start_date=start_date, end_date=end_date)
+            
+            if hist_daily is not None and not hist_daily.empty and 'amount' in hist_daily.columns:
+                # 计算近20个交易日的日均成交额
+                trade_dates = sorted(hist_daily['trade_date'].unique(), reverse=True)[:20]
+                if trade_dates:
+                    hist_money = hist_daily[hist_daily['trade_date'].isin(trade_dates)]['amount'].sum() / len(trade_dates)
+                else:
+                    hist_money = money  # 如果没有历史数据，使用当天数据
+            else:
+                hist_money = money  # 如果获取失败，使用当天数据
+            
+            if hist_money <= 0:
+                hist_money = money
+            
+            money_ratio = money / hist_money if hist_money > 0 else 1.0
+            # 归一化成交额比例：1.0表示正常，>1.2表示放量，<0.8表示缩量
+            # 转换为-1到1的范围：1.0 -> 0, 1.5 -> 0.5, 0.5 -> -0.5
+            money_score = (money_ratio - 1.0) * 2  # 1.0 -> 0, 1.5 -> 1.0, 0.5 -> -1.0
+            money_score = max(min(money_score, 1.0), -1.0)  # 限制在-1到1之间
+            
+            # 综合归一化（权重调整）
+            # 基础分50，涨跌家数影响±30，涨停跌停影响±10，成交额影响±10
+            idx = 50 + 30 * (up_ratio - 0.5) + 10 * limit_ratio + 10 * money_score
             idx = min(max(idx, 0), 100)
-            return idx
+            
+            logger.debug(f"[恐贪指数] 计算详情 - 上涨比例={up_ratio:.2%}, 涨停跌停比例={limit_ratio:.2f}, "
+                        f"成交额比例={money_ratio:.2f}, 成交额得分={money_score:.2f}, 最终指数={idx:.1f}")
+            
+            return float(idx)
         except Exception as e:
+            logger.error(f"[恐贪指数] 全市场数据获取失败: {e}", exc_info=True)
             print(f"[恐贪指数] 全市场数据获取失败，使用持仓估算法: {e}")
             return None
 
@@ -143,43 +193,77 @@ class PositionAnalyzer:
             pro = ts.pro_api(self.tushare_token)
             from datetime import datetime, timedelta
             import pandas as pd
+            import numpy as np
 
             today = datetime.now()
             start_date = (today - timedelta(days=window*2)).strftime('%Y%m%d')  # 多取几天防止节假日
             end_date = today.strftime('%Y%m%d')
+            
             # 批量获取近window*2天的所有A股daily数据
             daily_all = pro.daily(start_date=start_date, end_date=end_date)
             if daily_all is None or daily_all.empty:
+                logger.warning(f"[长期恐贪指数] 历史数据为空")
                 return None
+            
             # 只保留最近window个交易日
             trade_dates = sorted(daily_all['trade_date'].unique(), reverse=True)[:window]
+            if not trade_dates:
+                logger.warning(f"[长期恐贪指数] 无有效交易日")
+                return None
+            
             idx_list = []
-            # 近window日均成交额
+            # 计算近window日均成交额（用于对比）
             if 'amount' in daily_all.columns:
-                hist_money = daily_all[daily_all['trade_date'].isin(trade_dates)]['amount'].sum() / window
+                hist_money = daily_all[daily_all['trade_date'].isin(trade_dates)]['amount'].sum() / len(trade_dates)
             else:
                 hist_money = 1
+            
+            # 计算每个交易日的恐贪指数
             for trade_date in trade_dates:
                 daily = daily_all[daily_all['trade_date'] == trade_date]
                 if daily is None or daily.empty:
                     continue
-                up_count = (daily['pct_chg'] > 0).sum()
-                down_count = (daily['pct_chg'] < 0).sum()
+                
                 total_count = len(daily)
-                up_ratio = up_count / total_count if total_count else 0.5
+                if total_count == 0:
+                    continue
+                
+                # 1. 涨跌家数
+                up_count = (daily['pct_chg'] > 0).sum()
+                up_ratio = up_count / total_count
+                
+                # 2. 涨停/跌停家数（归一化）
                 limit_up_count = (daily['pct_chg'] > 9.5).sum()
                 limit_down_count = (daily['pct_chg'] < -9.5).sum()
-                limit_ratio = (limit_up_count - limit_down_count) / total_count if total_count else 0
+                max_limit_ratio = 0.1
+                limit_ratio = (limit_up_count - limit_down_count) / (total_count * max_limit_ratio)
+                limit_ratio = max(min(limit_ratio, 1.0), -1.0)
+                
+                # 3. 成交额（与近window日均值对比）
                 money = daily['amount'].sum() if 'amount' in daily.columns else 0
-                money_ratio = money / hist_money if hist_money else 1
-                idx = 50 + 30 * (up_ratio - 0.5) + 10 * limit_ratio + 10 * (money_ratio - 1)
+                if money <= 0 or hist_money <= 0:
+                    money_ratio = 1.0
+                else:
+                    money_ratio = money / hist_money
+                
+                # 归一化成交额比例
+                money_score = (money_ratio - 1.0) * 2
+                money_score = max(min(money_score, 1.0), -1.0)
+                
+                # 综合计算
+                idx = 50 + 30 * (up_ratio - 0.5) + 10 * limit_ratio + 10 * money_score
                 idx = min(max(idx, 0), 100)
                 idx_list.append(idx)
+            
             if idx_list:
-                return float(np.mean(idx_list))
+                avg_idx = float(np.mean(idx_list))
+                logger.debug(f"[长期恐贪指数] 计算完成 - 交易日数={len(idx_list)}, 平均指数={avg_idx:.1f}")
+                return avg_idx
             else:
+                logger.warning(f"[长期恐贪指数] 无有效指数数据")
                 return None
         except Exception as e:
+            logger.error(f"[长期恐贪指数] 获取失败: {e}", exc_info=True)
             print(f"[长期恐贪指数] 获取失败: {e}")
             return None
 

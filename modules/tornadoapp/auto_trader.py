@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime, time
 
 from xtquant.xttype import StockAccount
@@ -152,6 +152,411 @@ async def monitor_positions_continuously(
         except Exception as e:
             print(f"[持仓监控] 持仓分析失败: {e}")
         await asyncio.sleep(interval) 
+
+def _validate_data_quality(df, min_length: int = 60) -> Dict[str, Any]:
+    """
+    验证数据质量
+    
+    Returns:
+        {'valid': bool, 'issues': List[str], 'quality_score': float}
+    """
+    issues = []
+    quality_score = 1.0
+    
+    if df is None:
+        return {'valid': False, 'issues': ['数据为空'], 'quality_score': 0.0}
+    
+    if len(df) < min_length:
+        issues.append(f'数据长度不足：{len(df)} < {min_length}')
+        quality_score -= 0.5
+    
+    # 检查缺失值
+    missing_cols = df.isnull().any()
+    if missing_cols.any():
+        missing_list = missing_cols[missing_cols].index.tolist()
+        issues.append(f'存在缺失值：{missing_list}')
+        quality_score -= 0.2
+    
+    # 检查异常值（价格不能为负或0）
+    if 'close' in df.columns:
+        if (df['close'] <= 0).any():
+            issues.append('存在异常价格（<=0）')
+            quality_score -= 0.3
+    
+    # 检查成交量异常
+    if 'volume' in df.columns:
+        if (df['volume'] < 0).any():
+            issues.append('存在异常成交量（<0）')
+            quality_score -= 0.2
+    
+    quality_score = max(0.0, quality_score)
+    return {
+        'valid': quality_score >= 0.5,
+        'issues': issues,
+        'quality_score': quality_score
+    }
+
+
+def _calculate_ma_indicators(df, periods: List[int] = [5, 20, 60]) -> Dict[str, Any]:
+    """
+    计算均线指标（增强版：包含斜率、距离、交叉信号）
+    """
+    if df is None or len(df) < max(periods):
+        return None
+    
+    indicators = {}
+    closes = df['close']
+    
+    # 计算各周期均线
+    for period in periods:
+        ma = closes.rolling(window=period).mean()
+        indicators[f'ma{period}'] = {
+            'value': float(ma.iloc[-1]),
+            'slope': float(ma.iloc[-1] - ma.iloc[-2]) if len(ma) >= 2 else 0.0,  # 斜率
+            'distance_to_price': float((closes.iloc[-1] - ma.iloc[-1]) / ma.iloc[-1] * 100)  # 乖离率
+        }
+    
+    # 检测均线交叉信号
+    ma5 = closes.rolling(window=5).mean()
+    ma20 = closes.rolling(window=20).mean()
+    ma60 = closes.rolling(window=60).mean()
+    
+    # 金叉/死叉检测（最近5个交易日）
+    cross_signals = []
+    for i in range(-5, 0):
+        if i == -5:
+            continue
+        # MA5与MA20交叉
+        if ma5.iloc[i-1] <= ma20.iloc[i-1] and ma5.iloc[i] > ma20.iloc[i]:
+            cross_signals.append({'type': 'golden_cross_5_20', 'day': i})
+        elif ma5.iloc[i-1] >= ma20.iloc[i-1] and ma5.iloc[i] < ma20.iloc[i]:
+            cross_signals.append({'type': 'death_cross_5_20', 'day': i})
+        
+        # MA20与MA60交叉
+        if ma20.iloc[i-1] <= ma60.iloc[i-1] and ma20.iloc[i] > ma60.iloc[i]:
+            cross_signals.append({'type': 'golden_cross_20_60', 'day': i})
+        elif ma20.iloc[i-1] >= ma60.iloc[i-1] and ma20.iloc[i] < ma60.iloc[i]:
+            cross_signals.append({'type': 'death_cross_20_60', 'day': i})
+    
+    indicators['cross_signals'] = cross_signals
+    return indicators
+
+
+def _calculate_multi_period_returns(df) -> Dict[str, float]:
+    """计算多周期涨跌幅"""
+    if df is None or len(df) < 120:
+        return {}
+    
+    closes = df['close']
+    returns = {}
+    
+    periods = [5, 20, 60, 120]
+    for period in periods:
+        if len(df) >= period:
+            pct = (closes.iloc[-1] / closes.iloc[-period] - 1) * 100
+            returns[f'pct_{period}d'] = float(pct)
+    
+    return returns
+
+
+def judge_market_trend_comprehensive(
+    get_history_func,
+    position_analyzer: PositionAnalyzer,
+    fear_greed_index: float,
+    long_term_fear_greed_index: float,
+    index_codes: Optional[List[str]] = None  # 多指数列表
+) -> Dict[str, Any]:
+    """
+    综合判断市场趋势（牛市/熊市/震荡市）- 增强版
+    
+    优化点：
+    1. 多指数综合判断（上证、深证、创业板、中证500）
+    2. 成交量结合价格方向（放量上涨/下跌）
+    3. 数据质量验证
+    4. 均线系统增强（斜率、距离、交叉信号）
+    5. 多时间窗口（5日、20日、60日、120日）
+    6. 恐贪指数优化（加权平均、背离检测）
+    
+    结合多个维度：
+    1. 多指数均线系统（权重35%）
+    2. 恐贪指数（权重30%）
+    3. 多周期涨跌幅（权重20%）
+    4. 成交量+价格方向（权重15%）
+    
+    Args:
+        get_history_func: 获取历史数据的函数
+        position_analyzer: 持仓分析器
+        fear_greed_index: 当日恐贪指数
+        long_term_fear_greed_index: 长期恐贪指数
+        index_codes: 指数代码列表，默认['000001.SH', '399001.SZ', '399006.SZ', '000905.SH']
+                    (上证、深证、创业板、中证500)
+    
+    Returns:
+        {
+            'trend': 'bull'/'bear'/'neutral',  # 市场趋势
+            'confidence': 0.0-1.0,  # 置信度
+            'score': -1.0到1.0,  # 综合得分（正数偏向牛市，负数偏向熊市）
+            'factors': {...}  # 各因素得分详情
+        }
+    """
+    if index_codes is None:
+        index_codes = ['000001.SH', '399001.SZ', '399006.SZ', '000905.SH']  # 上证、深证、创业板、中证500
+    
+    factors = {}
+    scores = []
+    
+    try:
+        # ========== 1. 多指数均线系统（权重35%） ==========
+        index_ma_scores = []
+        index_ma_details = {}
+        
+        for idx_code in index_codes:
+            try:
+                df = get_history_func(idx_code)
+                quality = _validate_data_quality(df, min_length=60)
+                
+                if not quality['valid']:
+                    logger.warning(f"[市场趋势] 指数 {idx_code} 数据质量不足: {quality['issues']}")
+                    continue
+                
+                # 计算增强均线指标
+                ma_indicators = _calculate_ma_indicators(df)
+                if ma_indicators is None:
+                    continue
+                
+                ma5 = ma_indicators['ma5']['value']
+                ma20 = ma_indicators['ma20']['value']
+                ma60 = ma_indicators['ma60']['value']
+                current_price = df['close'].iloc[-1]
+                
+                # 均线排列得分
+                if ma5 > ma20 > ma60 and current_price > ma5:
+                    ma_score = 1.0  # 强烈牛市信号
+                elif ma5 < ma20 < ma60 and current_price < ma5:
+                    ma_score = -1.0  # 强烈熊市信号
+                elif ma5 > ma20 and current_price > ma20:
+                    ma_score = 0.5  # 偏多
+                elif ma5 < ma20 and current_price < ma20:
+                    ma_score = -0.5  # 偏空
+                else:
+                    ma_score = 0.0  # 震荡
+                
+                # 考虑均线斜率（趋势强度）
+                ma5_slope = ma_indicators['ma5']['slope']
+                ma20_slope = ma_indicators['ma20']['slope']
+                slope_bonus = 0.0
+                if ma_score > 0 and ma5_slope > 0 and ma20_slope > 0:
+                    slope_bonus = 0.2  # 上升趋势加强
+                elif ma_score < 0 and ma5_slope < 0 and ma20_slope < 0:
+                    slope_bonus = -0.2  # 下降趋势加强
+                
+                # 考虑交叉信号
+                cross_bonus = 0.0
+                for signal in ma_indicators.get('cross_signals', []):
+                    if signal['type'].startswith('golden_cross'):
+                        cross_bonus += 0.1
+                    elif signal['type'].startswith('death_cross'):
+                        cross_bonus -= 0.1
+                
+                final_score = ma_score + slope_bonus + cross_bonus
+                final_score = max(-1.0, min(1.0, final_score))  # 限制在-1到1
+                
+                index_ma_scores.append(final_score)
+                index_ma_details[idx_code] = {
+                    'score': final_score,
+                    'ma5': ma5,
+                    'ma20': ma20,
+                    'ma60': ma60,
+                    'current_price': current_price,
+                    'ma5_slope': ma5_slope,
+                    'ma20_slope': ma20_slope,
+                    'cross_signals': len(ma_indicators.get('cross_signals', [])),
+                    'quality_score': quality['quality_score']
+                }
+            except Exception as e:
+                logger.warning(f"[市场趋势] 处理指数 {idx_code} 失败: {e}")
+                continue
+        
+        if index_ma_scores:
+            # 多指数平均得分（可考虑加权，这里简单平均）
+            avg_ma_score = sum(index_ma_scores) / len(index_ma_scores)
+            factors['ma_system'] = {
+                'score': avg_ma_score,
+                'index_count': len(index_ma_scores),
+                'index_details': index_ma_details,
+                'consensus': 'strong_bull' if avg_ma_score > 0.7 else 'bull' if avg_ma_score > 0.3 else 
+                            'strong_bear' if avg_ma_score < -0.7 else 'bear' if avg_ma_score < -0.3 else 'neutral'
+            }
+            scores.append(avg_ma_score * 0.35)
+        else:
+            factors['ma_system'] = {'score': 0.0, 'error': '所有指数数据不足'}
+        
+        # ========== 2. 恐贪指数（权重30%）- 优化版 ==========
+        # 加权平均：当日0.6，长期0.4（更重视当日情绪）
+        weighted_fear_greed = fear_greed_index * 0.6 + long_term_fear_greed_index * 0.4
+        
+        # 背离检测：当日与长期差异过大
+        divergence = abs(fear_greed_index - long_term_fear_greed_index)
+        is_divergence = divergence > 20  # 差异超过20点认为有背离
+        
+        if weighted_fear_greed > 70:
+            fg_score = 1.0  # 强烈贪婪
+        elif weighted_fear_greed < 30:
+            fg_score = -1.0  # 强烈恐慌
+        else:
+            fg_score = (weighted_fear_greed - 50) / 50  # 归一化到-1到1
+        
+        # 背离调整：如果出现背离，降低置信度
+        if is_divergence:
+            if (fear_greed_index > 70 and long_term_fear_greed_index < 50) or \
+               (fear_greed_index < 30 and long_term_fear_greed_index > 50):
+                fg_score *= 0.7  # 降低得分权重
+        
+        factors['fear_greed'] = {
+            'score': fg_score,
+            'daily': fear_greed_index,
+            'long_term': long_term_fear_greed_index,
+            'weighted_avg': weighted_fear_greed,
+            'divergence': divergence,
+            'is_divergence': is_divergence
+        }
+        scores.append(fg_score * 0.3)
+        
+        # ========== 3. 多周期涨跌幅（权重20%） ==========
+        # 使用主要指数（上证）计算多周期涨跌幅
+        main_df = None
+        for idx_code in index_codes:
+            try:
+                df = get_history_func(idx_code)
+                if _validate_data_quality(df, min_length=120)['valid']:
+                    main_df = df
+                    break
+            except:
+                continue
+        
+        if main_df is not None:
+            multi_returns = _calculate_multi_period_returns(main_df)
+            
+            if multi_returns:
+                # 多周期综合得分（加权：短期权重更高）
+                period_weights = {'pct_5d': 0.4, 'pct_20d': 0.3, 'pct_60d': 0.2, 'pct_120d': 0.1}
+                weighted_return_score = 0.0
+                total_weight = 0.0
+                
+                for period_key, weight in period_weights.items():
+                    if period_key in multi_returns:
+                        pct = multi_returns[period_key]
+                        # 归一化得分
+                        if period_key == 'pct_5d':
+                            period_score = max(-1.0, min(1.0, pct / 3))  # 5日涨3%为满分
+                        elif period_key == 'pct_20d':
+                            period_score = max(-1.0, min(1.0, pct / 5))  # 20日涨5%为满分
+                        elif period_key == 'pct_60d':
+                            period_score = max(-1.0, min(1.0, pct / 10))  # 60日涨10%为满分
+                        else:  # pct_120d
+                            period_score = max(-1.0, min(1.0, pct / 15))  # 120日涨15%为满分
+                        
+                        weighted_return_score += period_score * weight
+                        total_weight += weight
+                
+                if total_weight > 0:
+                    final_return_score = weighted_return_score / total_weight
+                else:
+                    final_return_score = 0.0
+                
+                factors['index_return'] = {
+                    'score': final_return_score,
+                    'returns': multi_returns,
+                    'consistency': 'high' if all(r > 0 for r in multi_returns.values()) or 
+                                   all(r < 0 for r in multi_returns.values()) else 'low'
+                }
+                scores.append(final_return_score * 0.2)
+            else:
+                factors['index_return'] = {'score': 0.0, 'error': '无法计算多周期涨跌幅'}
+        else:
+            factors['index_return'] = {'score': 0.0, 'error': '主要指数数据不足'}
+        
+        # ========== 4. 成交量+价格方向（权重15%）- 优化版 ==========
+        if main_df is not None and len(main_df) >= 20:
+            # 成交量比率
+            vol_ratio = main_df['volume'].iloc[-5:].mean() / main_df['volume'].iloc[-20:-5].mean()
+            
+            # 价格变化方向（最近5日）
+            price_change_5d = (main_df['close'].iloc[-1] / main_df['close'].iloc[-5] - 1) * 100
+            
+            # 结合成交量和价格方向
+            if vol_ratio > 1.2:  # 放量
+                if price_change_5d > 2:  # 放量上涨
+                    vol_score = 0.8  # 强烈牛市信号
+                elif price_change_5d < -2:  # 放量下跌
+                    vol_score = -0.8  # 强烈熊市信号
+                else:  # 放量但价格变化不大
+                    vol_score = 0.2 if price_change_5d > 0 else -0.2
+            elif vol_ratio < 0.8:  # 缩量
+                if price_change_5d > 1:  # 缩量上涨（可能反弹乏力）
+                    vol_score = 0.1
+                elif price_change_5d < -1:  # 缩量下跌（可能继续下跌）
+                    vol_score = -0.5
+                else:  # 缩量震荡
+                    vol_score = -0.2
+            else:  # 正常量
+                vol_score = 0.1 if price_change_5d > 0 else -0.1
+            
+            factors['volume'] = {
+                'score': vol_score,
+                'volume_ratio': float(vol_ratio),
+                'price_change_5d': float(price_change_5d),
+                'signal': '放量上涨' if vol_ratio > 1.2 and price_change_5d > 2 else
+                         '放量下跌' if vol_ratio > 1.2 and price_change_5d < -2 else
+                         '缩量上涨' if vol_ratio < 0.8 and price_change_5d > 1 else
+                         '缩量下跌' if vol_ratio < 0.8 and price_change_5d < -1 else '正常'
+            }
+            scores.append(vol_score * 0.15)
+        else:
+            factors['volume'] = {'score': 0.0, 'error': '数据不足'}
+        
+        # ========== 综合得分 ==========
+        total_score = sum(scores) if scores else 0.0
+        confidence = min(abs(total_score), 1.0)
+        
+        # 动态阈值：根据数据质量调整
+        data_quality_avg = sum([f.get('quality_score', 1.0) for f in factors.values() 
+                               if isinstance(f, dict) and 'quality_score' in f]) / max(1, len([f for f in factors.values() 
+                               if isinstance(f, dict) and 'quality_score' in f]))
+        
+        # 数据质量高时使用标准阈值，质量低时放宽阈值
+        threshold = 0.3 if data_quality_avg > 0.8 else 0.25
+        
+        # 判断趋势
+        if total_score > threshold:
+            trend = 'bull'  # 牛市
+        elif total_score < -threshold:
+            trend = 'bear'  # 熊市
+        else:
+            trend = 'neutral'  # 震荡市
+        
+        return {
+            'trend': trend,
+            'confidence': confidence,
+            'score': total_score,
+            'threshold_used': threshold,
+            'data_quality_avg': data_quality_avg,
+            'factors': factors,
+            'description': {
+                'bull': '牛市：市场情绪乐观，多指数上涨，均线多头排列',
+                'bear': '熊市：市场情绪悲观，多指数下跌，均线空头排列',
+                'neutral': '震荡市：市场方向不明确，多空力量均衡'
+            }[trend]
+        }
+    except Exception as e:
+        logger.error(f"判断市场趋势失败: {e}", exc_info=True)
+        return {
+            'trend': 'neutral',
+            'confidence': 0.0,
+            'score': 0.0,
+            'factors': {},
+            'error': str(e)
+        }
 
 # 添加多策略自动交易函数
 async def monitor_positions_and_trade_multi_strategy(
@@ -342,7 +747,13 @@ async def monitor_positions_and_trade_multi_strategy(
         try:
             # 获取最新持仓分析
             positions = xt_trader.query_stock_positions(account)
-            valid_positions = [p for p in positions if hasattr(p, 'stock_code') and hasattr(p, 'volume')]
+            # 过滤有效持仓：必须有stock_code和volume属性，且持仓数量大于0（剔除已卖出的股票）
+            valid_positions = [
+                p for p in positions 
+                if hasattr(p, 'stock_code') 
+                and hasattr(p, 'volume') 
+                and p.volume > 0  # 剔除已卖出的股票（volume为0）
+            ]
             
             # 持仓分析
             analysis = position_analyzer.analyze_positions([
@@ -361,8 +772,38 @@ async def monitor_positions_and_trade_multi_strategy(
             long_term_fear_greed_index = getattr(summary, 'long_term_fear_greed_index', 50)
             print(f"[恐贪指数] 当日: {fear_greed_index:.1f}，长期: {long_term_fear_greed_index:.1f}")
             
-            # 智能策略分配
-            held_symbols = [p.stock_code for p in valid_positions]
+            # 综合判断市场趋势（牛市/熊市/震荡市）- 使用多指数综合判断
+            market_trend = judge_market_trend_comprehensive(
+                get_history_func=get_history_func,
+                position_analyzer=position_analyzer,
+                fear_greed_index=fear_greed_index,
+                long_term_fear_greed_index=long_term_fear_greed_index,
+                index_codes=['000001.SH', '399001.SZ', '399006.SZ', '000905.SH']  # 上证、深证、创业板、中证500
+            )
+            
+            logger.info(f"[市场趋势] {market_trend['trend']} ({market_trend['description']})，"
+                       f"置信度={market_trend['confidence']:.2f}，综合得分={market_trend['score']:.2f}")
+            print(f"[市场趋势] {market_trend['trend']}，置信度={market_trend['confidence']:.2f}，得分={market_trend['score']:.2f}")
+            
+            # 根据市场趋势动态调整止盈阈值
+            if market_trend['trend'] == 'bull':
+                # 牛市：提高止盈阈值，让利润奔跑
+                take_profit_threshold = 20.0  # 从15%提高到20%
+                logger.info(f"[策略调整] 牛市环境，提高止盈阈值至{take_profit_threshold}%")
+            elif market_trend['trend'] == 'bear':
+                # 熊市：降低止盈阈值，及时落袋为安
+                take_profit_threshold = 10.0  # 从15%降低到10%
+                logger.info(f"[策略调整] 熊市环境，降低止盈阈值至{take_profit_threshold}%")
+            else:
+                # 震荡市：使用基础阈值
+                take_profit_threshold = 15.0
+                logger.info(f"[策略调整] 震荡市环境，使用基础止盈阈值{take_profit_threshold}%")
+            
+            # 将止盈阈值保存到market_trend中，供卖出逻辑使用
+            market_trend['take_profit_threshold'] = take_profit_threshold
+            
+            # 智能策略分配：只包含实际持有的股票（已剔除已卖出的股票）
+            held_symbols = [p.stock_code for p in valid_positions if p.volume > 0]
             strategy_assignments = assign_strategies_to_stocks(held_symbols, fear_greed_index)
             
             # 更新策略分配
@@ -376,16 +817,30 @@ async def monitor_positions_and_trade_multi_strategy(
             # print(f"[策略状态] {strategy_status}")
             
             # 选股池自动买入（自适应热点行业）
-            # 只在早上9:50-10:00执行问财选股，其他时间不选股
+            # 只在指定时间段执行问财选股：早上9:50-10:00，下午14:20-14:30
             current_time = datetime.now().time()
-            stock_selection_start = time(9, 50)
-            stock_selection_end = time(10, 0)
-            is_stock_selection_time = stock_selection_start <= current_time <= stock_selection_end
+            # 定义选股时间段列表
+            stock_selection_periods = [
+                (time(9, 50), time(10, 0)),   # 早上9:50-10:00
+                (time(14, 20), time(14, 30))  # 下午14:20-14:30
+            ]
+            # 检查当前时间是否在任一选股时间段内
+            is_stock_selection_time = any(
+                period_start <= current_time <= period_end 
+                for period_start, period_end in stock_selection_periods
+            )
             
             selected = []  # 默认不选股
             if is_stock_selection_time:
+                # 确定当前在哪个时间段
+                current_period = None
+                for period_start, period_end in stock_selection_periods:
+                    if period_start <= current_time <= period_end:
+                        current_period = f"{period_start.strftime('%H:%M')}-{period_end.strftime('%H:%M')}"
+                        break
+                
                 try:
-                    logger.info(f"[选股] 当前时间{current_time.strftime('%H:%M:%S')}在选股时间段内(9:50-10:00)，执行问财选股")
+                    logger.info(f"[选股] 当前时间{current_time.strftime('%H:%M:%S')}在选股时间段内({current_period})，执行问财选股")
                     # selected_codes = stock_selector.select_by_hot_industry()
                     # print(f"热点行业选股结果: {selected_codes}")
                     question_list = []
@@ -546,10 +1001,12 @@ async def monitor_positions_and_trade_multi_strategy(
                         sell_signals.append(True)
                         sell_reasons.append(f"止损(亏损{pnl_pct:.2f}%)")
                     
-                    # 2. 止盈：盈利超过15%
-                    if pnl_pct > 15:
+                    # 2. 止盈：根据市场趋势动态调整止盈阈值
+                    # 牛市：20%，震荡市：15%，熊市：10%
+                    take_profit_threshold = market_trend.get('take_profit_threshold', 15.0)
+                    if pnl_pct > take_profit_threshold:
                         sell_signals.append(True)
-                        sell_reasons.append(f"止盈(盈利{pnl_pct:.2f}%)")
+                        sell_reasons.append(f"止盈(盈利{pnl_pct:.2f}%，阈值{take_profit_threshold}%)")
                     
                     # 3. 均线死叉：MA5下穿MA20
                     if ma5 and ma20 and ma5 < ma20:

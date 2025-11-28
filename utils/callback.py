@@ -231,24 +231,87 @@ class OrderCallbackHandler:
             logging.exception(f"[回调异常] 订单回报处理异常: {e}")
             self.notify_user(f"[回调异常] 订单回报处理异常: {e}")
     
+    def _normalize_stock_code(self, symbol: str) -> str:
+        """
+        标准化股票代码格式
+        将 [SZ002083] 或 SZ002083 转换为 002083.SZ 格式（系统使用的格式）
+        """
+        if not symbol:
+            return symbol
+        
+        # 如果已经是标准格式（如 002083.SZ 或 000001.SH），直接返回
+        if '.' in symbol:
+            return symbol
+        
+        # 处理 [SZ002083] 或 SZ002083 格式
+        import re
+        # 移除方括号
+        symbol = symbol.replace('[', '').replace(']', '').strip()
+        
+        # 匹配 SZ002083 或 SH600000 格式
+        match = re.match(r'([SH|SZ])(\d{6})', symbol)
+        if match:
+            market = match.group(1)
+            code = match.group(2)
+            # 转换为 002083.SZ 格式（系统使用的格式：代码.市场）
+            return f"{code}.{market}"
+        
+        # 如果只有6位数字，尝试根据代码判断市场
+        if re.match(r'^\d{6}$', symbol):
+            # 6开头是上海，0/3开头是深圳
+            if symbol.startswith('6'):
+                return f"{symbol}.SH"
+            else:
+                return f"{symbol}.SZ"
+        
+        return symbol
+    
     def on_order_error(self, order_error):
         """
         委托失败推送 - 自动撤上一个订单
         :param order_error: XtOrderError 对象
         :return:
         """
+        import re
+        from datetime import datetime
+        
         failed_order_id = order_error.order_id
         error_id = order_error.error_id
         error_msg = order_error.error_msg
         logging.warning(f"[委托失败] 订单ID: {failed_order_id}, 错误ID: {error_id}, 错误信息: {error_msg}")
         print(f"[委托失败] 订单ID: {failed_order_id}, 错误ID: {error_id}, 错误信息: {error_msg}")
         
-        # 尝试获取股票代码
+        # 尝试获取股票代码（多种方法）
         symbol = None
-        # 方法1: 从broker_order_to_symbol查找
-        symbol = self.broker_order_to_symbol.get(failed_order_id)
         
-        # 方法2: 从order_manager查找订单信息
+        # 方法1: 从order_error对象直接获取stock_code属性（如果存在）
+        try:
+            symbol = getattr(order_error, 'stock_code', None)
+            if symbol:
+                symbol = self._normalize_stock_code(symbol)
+                logging.info(f"[撤单] 从order_error对象获取股票代码: {symbol}")
+        except Exception as e:
+            logging.debug(f"[撤单] 尝试从order_error获取stock_code失败: {e}")
+        
+        # 方法2: 从错误信息中解析股票代码（格式如：[SZ002083] 或 [SH600000]）
+        if not symbol and error_msg:
+            try:
+                # 匹配 [SZ002083] 或 [SH600000] 格式
+                match = re.search(r'\[([SH|SZ]\d{6})\]', error_msg)
+                if match:
+                    raw_symbol = match.group(1)
+                    symbol = self._normalize_stock_code(raw_symbol)
+                    logging.info(f"[撤单] 从错误信息中解析股票代码: {raw_symbol} -> {symbol}")
+            except Exception as e:
+                logging.debug(f"[撤单] 从错误信息解析股票代码失败: {e}")
+        
+        # 方法3: 从broker_order_to_symbol查找
+        if not symbol:
+            symbol = self.broker_order_to_symbol.get(failed_order_id)
+            if symbol:
+                logging.info(f"[撤单] 从broker_order_to_symbol获取股票代码: {symbol}")
+        
+        # 方法4: 从order_manager查找订单信息
         if not symbol:
             try:
                 # 通过broker_order_map查找本地订单
@@ -257,15 +320,69 @@ class OrderCallbackHandler:
                     order = self.order_manager.get_order(local_order_id)
                     if order:
                         symbol = order.symbol
+                        logging.info(f"[撤单] 从order_manager获取股票代码: {symbol}")
             except Exception as e:
                 logging.warning(f"[撤单] 查找订单信息失败: {e}")
         
-        # 如果找到股票代码，尝试撤该股票的上一个订单
+        # 方法5: 遍历order_history查找（最后手段）
+        if not symbol:
+            try:
+                for sym, orders in self.order_history.items():
+                    for order_info in orders:
+                        if order_info.get('broker_order_id') == failed_order_id:
+                            symbol = sym
+                            logging.info(f"[撤单] 从order_history遍历获取股票代码: {symbol}")
+                            break
+                    if symbol:
+                        break
+            except Exception as e:
+                logging.warning(f"[撤单] 遍历order_history失败: {e}")
+        
+        # 方法6: 如果从错误信息解析到了代码但格式可能不同，尝试在order_history中模糊匹配
+        if symbol and '.' in symbol:
+            # 如果order_history中没有这个格式的symbol，尝试查找相同代码但不同格式的
+            if symbol not in self.order_history:
+                code_part = symbol.split('.')[0]  # 提取代码部分（如 002083）
+                for sym in self.order_history.keys():
+                    if sym.split('.')[0] == code_part:  # 代码部分相同
+                        symbol = sym  # 使用order_history中的格式
+                        logging.info(f"[撤单] 找到相同代码但不同格式的股票: {sym} -> {symbol}")
+                        break
+        
+        # 如果找到股票代码，记录失败订单并尝试撤上一个订单
         if symbol:
+            # 记录失败订单到历史（即使失败也要记录，方便后续查找）
+            if symbol not in self.order_history:
+                self.order_history[symbol] = []
+            
+            # 检查是否已记录此订单
+            order_exists = any(
+                order_info.get('broker_order_id') == failed_order_id 
+                for order_info in self.order_history[symbol]
+            )
+            
+            if not order_exists:
+                order_info = {
+                    'broker_order_id': failed_order_id,
+                    'symbol': symbol,
+                    'timestamp': datetime.now(),
+                    'status': '委托失败',
+                    'error_id': error_id,
+                    'error_msg': error_msg
+                }
+                self.order_history[symbol].append(order_info)
+                self.broker_order_to_symbol[failed_order_id] = symbol
+                logging.info(f"[撤单] 已记录失败订单到历史: {symbol} - {failed_order_id}")
+            
+            # 尝试撤该股票的上一个订单
             self._cancel_previous_order(symbol, failed_order_id)
         else:
             logging.warning(f"[撤单] 无法找到失败订单{failed_order_id}对应的股票代码，无法撤单")
             print(f"[撤单] 无法找到失败订单{failed_order_id}对应的股票代码，无法撤单")
+            # 打印调试信息
+            print(f"[调试] broker_order_to_symbol keys (前10个): {list(self.broker_order_to_symbol.keys())[:10]}")
+            print(f"[调试] order_history symbols: {list(self.order_history.keys())}")
+            print(f"[调试] 错误信息: {error_msg}")
     
     def _cancel_previous_order(self, symbol, failed_order_id):
         """
