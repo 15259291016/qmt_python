@@ -649,6 +649,326 @@ def generate_mock_data(days: int = 60) -> pd.DataFrame:
     return df
 
 
+async def detect_market_reversal(
+    index_code: str = '000001.SH',
+    lookback_days: int = 20,
+    get_history_func=None
+) -> Dict[str, Any]:
+    """
+    检测市场反转信号
+    
+    反转判断逻辑：
+    1. 趋势变化：从牛市变熊市，或从熊市变牛市
+    2. 均线交叉：金叉（死叉）信号
+    3. 恐贪指数背离：价格创新低但恐贪指数不创新低（或相反）
+    4. 成交量配合：放量突破或放量下跌
+    5. 多周期确认：多个时间周期同时出现反转信号
+    
+    Args:
+        index_code: 指数代码，默认 '000001.SH'（上证指数）
+        lookback_days: 回看天数，默认20天
+        get_history_func: 获取历史数据的函数，如果为None则使用xtquant
+    
+    Returns:
+        {
+            'has_reversal': bool,  # 是否出现反转信号
+            'reversal_type': str,  # 'BULL_TO_BEAR'（牛转熊）/'BEAR_TO_BULL'（熊转牛）/'NONE'（无反转）
+            'confidence': float,  # 反转信号置信度（0-1）
+            'signals': {
+                'trend_change': bool,  # 趋势变化
+                'ma_cross': bool,  # 均线交叉
+                'divergence': bool,  # 恐贪指数背离
+                'volume_confirmation': bool,  # 成交量确认
+            },
+            'details': {
+                'current_trend': str,  # 当前趋势
+                'previous_trend': str,  # 之前趋势
+                'ma_cross_type': str,  # 均线交叉类型
+                'price_change_pct': float,  # 价格变化百分比
+                'volume_ratio': float,  # 成交量比率
+            }
+        }
+    """
+    if get_history_func is None:
+        if not HAS_XTQUANT:
+            return {
+                'has_reversal': False,
+                'reversal_type': 'NONE',
+                'confidence': 0.0,
+                'error': 'xtquant未安装，无法获取数据'
+            }
+        get_history_func = get_stock_data_xtquant
+    
+    try:
+        # 获取历史数据（需要足够长的数据来计算趋势变化）
+        # 需要至少 lookback_days + 20 天的数据来计算指标
+        required_days = lookback_days + 20
+        df = await asyncio.to_thread(get_history_func, index_code, required_days)
+        if df is None or df.empty or len(df) < required_days:
+            return {
+                'has_reversal': False,
+                'reversal_type': 'NONE',
+                'confidence': 0.0,
+                'error': f'数据不足，需要至少{required_days}天数据'
+            }
+        
+        # 计算牛熊指标
+        indicator = BullBearIndicator(short_period=5, long_period=20, volume_period=5)
+        df = indicator.calculate(df)
+        
+        # 获取当前和之前的数据
+        current = df.iloc[-1]
+        previous = df.iloc[-lookback_days] if len(df) > lookback_days else df.iloc[0]
+        
+        # 1. 检测趋势变化
+        current_trend = current['bull_bear_signal']
+        previous_trend = previous['bull_bear_signal']
+        trend_change = (current_trend == 'BULL' and previous_trend == 'BEAR') or \
+                      (current_trend == 'BEAR' and previous_trend == 'BULL')
+        
+        # 2. 检测均线交叉（金叉/死叉）
+        # 当前：短期均线 vs 长期均线
+        current_ma_cross = 'none'
+        if current['ma_short'] > current['ma_long'] and previous['ma_short'] <= previous['ma_long']:
+            current_ma_cross = 'golden_cross'  # 金叉：短期上穿长期
+        elif current['ma_short'] < current['ma_long'] and previous['ma_short'] >= previous['ma_long']:
+            current_ma_cross = 'death_cross'  # 死叉：短期下穿长期
+        
+        # 检查最近5天是否有交叉信号
+        ma_cross_signal = False
+        if len(df) >= 5:
+            recent_5d = df.iloc[-5:]
+            for i in range(1, len(recent_5d)):
+                prev_row = recent_5d.iloc[i-1]
+                curr_row = recent_5d.iloc[i]
+                if prev_row['ma_short'] <= prev_row['ma_long'] and curr_row['ma_short'] > curr_row['ma_long']:
+                    ma_cross_signal = True
+                    current_ma_cross = 'golden_cross'
+                    break
+                elif prev_row['ma_short'] >= prev_row['ma_long'] and curr_row['ma_short'] < curr_row['ma_long']:
+                    ma_cross_signal = True
+                    current_ma_cross = 'death_cross'
+                    break
+        
+        # 3. 检测价格和成交量的变化
+        price_change_pct = (current['close'] - previous['close']) / previous['close'] * 100
+        volume_ratio = current['volume'] / previous['volume'] if previous['volume'] > 0 else 1.0
+        
+        # 成交量确认：放量配合趋势变化
+        volume_confirmation = False
+        if trend_change:
+            if (current_trend == 'BULL' and volume_ratio > 1.2) or \
+               (current_trend == 'BEAR' and volume_ratio > 1.2):
+                volume_confirmation = True
+        
+        # 4. 检测恐贪指数背离（需要外部传入，这里先标记）
+        # 背离：价格创新低但恐贪指数不创新低（或相反）
+        divergence = False
+        # 注意：这里需要外部传入恐贪指数数据，暂时标记为False
+        # 实际使用时，可以从 position_analyzer 获取恐贪指数历史数据
+        
+        # 5. 综合判断反转信号
+        signals = {
+            'trend_change': trend_change,
+            'ma_cross': ma_cross_signal,
+            'divergence': divergence,
+            'volume_confirmation': volume_confirmation
+        }
+        
+        # 计算置信度
+        signal_count = sum([1 for v in signals.values() if v])
+        confidence = min(signal_count / 4.0, 1.0)  # 最多4个信号，全部满足时置信度为1.0
+        
+        # 判断反转类型
+        reversal_type = 'NONE'
+        if trend_change or ma_cross_signal:
+            if current_trend == 'BULL' and previous_trend == 'BEAR':
+                reversal_type = 'BEAR_TO_BULL'  # 熊转牛
+            elif current_trend == 'BEAR' and previous_trend == 'BULL':
+                reversal_type = 'BULL_TO_BEAR'  # 牛转熊
+            elif ma_cross_signal:
+                if current_ma_cross == 'golden_cross':
+                    reversal_type = 'BEAR_TO_BULL'
+                elif current_ma_cross == 'death_cross':
+                    reversal_type = 'BULL_TO_BEAR'
+        
+        has_reversal = reversal_type != 'NONE' and confidence >= 0.3
+        
+        return {
+            'has_reversal': has_reversal,
+            'reversal_type': reversal_type,
+            'confidence': confidence,
+            'signals': signals,
+            'details': {
+                'current_trend': current_trend,
+                'previous_trend': previous_trend,
+                'ma_cross_type': current_ma_cross,
+                'price_change_pct': float(price_change_pct),
+                'volume_ratio': float(volume_ratio),
+                'current_score': float(current['bull_bear_score']),
+                'previous_score': float(previous['bull_bear_score']),
+                'current_close': float(current['close']),
+                'previous_close': float(previous['close'])
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"[反转检测] 检测失败: {e}", exc_info=True)
+        return {
+            'has_reversal': False,
+            'reversal_type': 'NONE',
+            'confidence': 0.0,
+            'error': str(e)
+        }
+
+
+async def detect_market_reversal_with_fear_greed(
+    index_code: str = '000001.SH',
+    lookback_days: int = 20,
+    fear_greed_history: Optional[List[Dict[str, Any]]] = None,
+    get_history_func=None
+) -> Dict[str, Any]:
+    """
+    检测市场反转信号（增强版：包含恐贪指数背离检测）
+    
+    在基础反转检测的基础上，增加恐贪指数背离检测：
+    - 价格创新低，但恐贪指数不创新低 → 可能见底反转（熊转牛）
+    - 价格创新高，但恐贪指数不创新高 → 可能见顶反转（牛转熊）
+    
+    Args:
+        index_code: 指数代码，默认 '000001.SH'（上证指数）
+        lookback_days: 回看天数，默认20天
+        fear_greed_history: 恐贪指数历史数据列表，格式：
+            [
+                {'date': '20250101', 'index': 45.5, 'price': 3000.0},
+                ...
+            ]
+        get_history_func: 获取历史数据的函数，如果为None则使用xtquant
+    
+    Returns:
+        同 detect_market_reversal，但增加 'divergence_details' 字段
+    """
+    # 先执行基础反转检测
+    base_result = await detect_market_reversal(
+        index_code=index_code,
+        lookback_days=lookback_days,
+        get_history_func=get_history_func
+    )
+    
+    if 'error' in base_result:
+        return base_result
+    
+    # 如果有恐贪指数历史数据，检测背离
+    if fear_greed_history and len(fear_greed_history) >= lookback_days:
+        try:
+            # 获取价格历史数据
+            if get_history_func is None:
+                if not HAS_XTQUANT:
+                    return base_result
+                get_history_func = get_stock_data_xtquant
+            
+            # 需要足够的数据来计算背离
+            required_days = lookback_days + 10
+            df = await asyncio.to_thread(get_history_func, index_code, required_days)
+            if df is None or df.empty or len(df) < lookback_days:
+                return base_result
+            
+            # 对齐价格和恐贪指数数据（按日期）
+            recent_prices = df[['time', 'close']].tail(lookback_days).copy()
+            recent_prices['date'] = pd.to_datetime(recent_prices['time']).dt.strftime('%Y%m%d')
+            
+            # 构建恐贪指数DataFrame
+            fg_df = pd.DataFrame(fear_greed_history)
+            if 'date' not in fg_df.columns:
+                return base_result
+            
+            # 合并数据
+            merged = recent_prices.merge(fg_df, on='date', how='inner')
+            if len(merged) < 5:  # 至少需要5个数据点
+                return base_result
+            
+            # 检测背离
+            # 1. 价格创新低，但恐贪指数不创新低（可能见底）
+            recent_prices_sorted = merged.sort_values('close')
+            recent_fg_sorted = merged.sort_values('index')
+            
+            price_lowest = recent_prices_sorted.iloc[0]
+            fg_lowest = recent_fg_sorted.iloc[0]
+            
+            # 如果价格最低点不是恐贪指数最低点，可能存在背离
+            price_lowest_date = price_lowest['date']
+            fg_lowest_date = fg_lowest['date']
+            
+            bear_to_bull_divergence = False
+            if price_lowest_date != fg_lowest_date:
+                # 价格创新低，但恐贪指数在更早的日期达到最低点
+                price_lowest_matches = merged[merged['date'] == price_lowest_date]
+                fg_lowest_matches = merged[merged['date'] == fg_lowest_date]
+                
+                if len(price_lowest_matches) > 0 and len(fg_lowest_matches) > 0:
+                    price_lowest_idx = price_lowest_matches.index[0]
+                    fg_lowest_idx = fg_lowest_matches.index[0]
+                    
+                    if price_lowest_idx > fg_lowest_idx:
+                        # 价格在更晚的日期创新低，但恐贪指数已经提前见底
+                        bear_to_bull_divergence = True
+            
+            # 2. 价格创新高，但恐贪指数不创新高（可能见顶）
+            recent_prices_sorted_desc = merged.sort_values('close', ascending=False)
+            recent_fg_sorted_desc = merged.sort_values('index', ascending=False)
+            
+            price_highest = recent_prices_sorted_desc.iloc[0]
+            fg_highest = recent_fg_sorted_desc.iloc[0]
+            
+            price_highest_date = price_highest['date']
+            fg_highest_date = fg_highest['date']
+            
+            bull_to_bear_divergence = False
+            if price_highest_date != fg_highest_date:
+                price_highest_matches = merged[merged['date'] == price_highest_date]
+                fg_highest_matches = merged[merged['date'] == fg_highest_date]
+                
+                if len(price_highest_matches) > 0 and len(fg_highest_matches) > 0:
+                    price_highest_idx = price_highest_matches.index[0]
+                    fg_highest_idx = fg_highest_matches.index[0]
+                    
+                    if price_highest_idx > fg_highest_idx:
+                        # 价格在更晚的日期创新高，但恐贪指数已经提前见顶
+                        bull_to_bear_divergence = True
+            
+            # 更新背离信号
+            base_result['signals']['divergence'] = bear_to_bull_divergence or bull_to_bear_divergence
+            
+            # 更新反转类型和置信度
+            if bear_to_bull_divergence and base_result['reversal_type'] == 'NONE':
+                base_result['reversal_type'] = 'BEAR_TO_BULL'
+                base_result['confidence'] = min(base_result['confidence'] + 0.2, 1.0)
+            elif bull_to_bear_divergence and base_result['reversal_type'] == 'NONE':
+                base_result['reversal_type'] = 'BULL_TO_BEAR'
+                base_result['confidence'] = min(base_result['confidence'] + 0.2, 1.0)
+            
+            # 添加背离详情
+            base_result['divergence_details'] = {
+                'bear_to_bull': bear_to_bull_divergence,
+                'bull_to_bear': bull_to_bear_divergence,
+                'price_lowest_date': price_lowest_date if bear_to_bull_divergence else None,
+                'fg_lowest_date': fg_lowest_date if bear_to_bull_divergence else None,
+                'price_highest_date': price_highest_date if bull_to_bear_divergence else None,
+                'fg_highest_date': fg_highest_date if bull_to_bear_divergence else None
+            }
+            
+            # 重新计算是否有反转
+            signal_count = sum([1 for v in base_result['signals'].values() if v])
+            base_result['confidence'] = min(signal_count / 4.0, 1.0)
+            base_result['has_reversal'] = base_result['reversal_type'] != 'NONE' and base_result['confidence'] >= 0.3
+            
+        except Exception as e:
+            logger.warning(f"[反转检测] 恐贪指数背离检测失败: {e}")
+            # 如果背离检测失败，返回基础结果
+    
+    return base_result
+
+
 async def main_async(symbol_or_market: str = 'market') -> Dict[str, Any]:
     """
     异步主函数：获取牛熊指标（纯函数，不打印）
@@ -675,11 +995,19 @@ def main():
         # 默认使用市场模式
         symbol_or_market = 'market'
     
-    # 运行异步主函数并打印结果
-    result = asyncio.run(main_async(symbol_or_market))
-    
-    # 以JSON格式打印结果（便于调试和查看）
-    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    # 如果第二个参数是 'reversal'，则执行反转检测
+    if len(sys.argv) > 2 and sys.argv[2] == 'reversal':
+        # 执行反转检测
+        result = asyncio.run(detect_market_reversal(
+            index_code='000001.SH',
+            lookback_days=20
+        ))
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    else:
+        # 运行异步主函数并打印结果
+        result = asyncio.run(main_async(symbol_or_market))
+        # 以JSON格式打印结果（便于调试和查看）
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
 
 
 if __name__ == '__main__':

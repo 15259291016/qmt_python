@@ -1,9 +1,11 @@
 import json
 import logging
-from typing import Any, Union
+from typing import Any, Union, Type, TypeVar, get_type_hints, get_origin, get_args
+from inspect import signature, Parameter
 
 import pandas as pd
 from tornado.web import RequestHandler
+from pydantic import BaseModel, ValidationError
 
 from .exception import BaseException
 from .exception import RequestException
@@ -13,6 +15,8 @@ from modules.tornadoapp.define.enum.staff_admin import RuleAction
 # from utils.user_admin.models import AuthRuleAsync
 from .ApiCode import ApiCode
 from modules.tornadoapp.utils.format import json_serial, CustomJSONEncoder
+
+T = TypeVar('T', bound=BaseModel)
 
 
 class BaseHandler(RequestHandler):
@@ -28,8 +32,10 @@ class BaseHandler(RequestHandler):
             try:
                 body_data = json.loads(self.request.body)
                 self.request_data = dict(**self.request_data, **body_data)
+            except json.JSONDecodeError as e:
+                logging.warning(f"JSON解析失败: {e}")
             except Exception as e:
-                logging.info(e)
+                logging.error(f"请求体解析失败: {e}", exc_info=True)
 
     def get_query_to_dict(self):
         arguments = self.request.arguments
@@ -46,6 +52,75 @@ class BaseHandler(RequestHandler):
             return default
         else:
             raise BaseException(ErrorCode.PARAMS_ERROR, ErrorMsg.PARAMS_ERROR)
+    
+    def parse_pydantic_model(self, model_class: Type[T], data: dict = None) -> T:
+        """
+        解析Pydantic模型（从请求体或传入数据）
+        
+        Args:
+            model_class: Pydantic模型类
+            data: 数据字典，如果为None则从请求体解析
+        
+        Returns:
+            Pydantic模型实例
+        
+        Raises:
+            ValidationError: 验证失败
+        """
+        if data is None:
+            if not self.request.body:
+                raise BaseException(ErrorCode.PARAMS_ERROR, "请求体为空")
+            try:
+                data = json.loads(self.request.body)
+            except json.JSONDecodeError as e:
+                raise BaseException(ErrorCode.PARAMS_ERROR, f"JSON解析失败: {str(e)}")
+        
+        try:
+            return model_class(**data)
+        except ValidationError as e:
+            error_msg = "; ".join([f"{err['loc']}: {err['msg']}" for err in e.errors()])
+            raise BaseException(ErrorCode.PARAMS_ERROR, f"参数验证失败: {error_msg}")
+    
+    def parse_query_params(self, model_class: Type[T]) -> T:
+        """
+        从查询参数解析Pydantic模型
+        
+        Args:
+            model_class: Pydantic模型类
+        
+        Returns:
+            Pydantic模型实例
+        """
+        query_data = {}
+        for key in self.request.arguments:
+            value = self.get_argument(key, None)
+            if value is not None:
+                # 尝试类型转换
+                sig = signature(model_class)
+                if key in sig.parameters:
+                    param = sig.parameters[key]
+                    param_type = param.annotation
+                    if param_type != Parameter.empty:
+                        # 简单类型转换
+                        if param_type == bool:
+                            value = value.lower() in ('true', '1', 'yes', 'on')
+                        elif param_type == int:
+                            try:
+                                value = int(value)
+                            except (ValueError, TypeError):
+                                raise BaseException(ErrorCode.PARAMS_ERROR, f"参数 {key} 必须是整数")
+                        elif param_type == float:
+                            try:
+                                value = float(value)
+                            except (ValueError, TypeError):
+                                raise BaseException(ErrorCode.PARAMS_ERROR, f"参数 {key} 必须是数字")
+                query_data[key] = value
+        
+        try:
+            return model_class(**query_data)
+        except ValidationError as e:
+            error_msg = "; ".join([f"{err['loc']}: {err['msg']}" for err in e.errors()])
+            raise BaseException(ErrorCode.PARAMS_ERROR, f"查询参数验证失败: {error_msg}")
 
     def prepare(self):
         # 前置预处理方法, 在执行对应的请求方法之前调用

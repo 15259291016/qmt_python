@@ -322,8 +322,37 @@ class PositionAnalyzer:
         weights = [p.market_value / summary.total_market_value for p in positions if summary.total_market_value > 0]
         concentration_risk = max(weights) if weights else 0.0
         
-        # 行业集中度 - 简化处理，假设所有股票在同一行业
-        sector_concentration = 1.0  # 实际应该根据行业分类计算
+        # 行业集中度 - 计算最大行业权重
+        sector_weights = {}
+        # 批量获取行业信息，避免重复API调用
+        symbols_to_query = [p.symbol for p in positions if not hasattr(p, 'industry') or getattr(p, 'industry', None) is None]
+        industry_map = {}
+        
+        if symbols_to_query:
+            try:
+                # 批量查询行业信息（tushare支持逗号分隔的多个ts_code）
+                # 注意：如果股票数量很多，需要分批查询
+                batch_size = 100
+                for i in range(0, len(symbols_to_query), batch_size):
+                    batch_symbols = symbols_to_query[i:i + batch_size]
+                    stock_info = self.pro.stock_basic(ts_code=','.join(batch_symbols), fields='ts_code,industry')
+                    if not stock_info.empty:
+                        for _, row in stock_info.iterrows():
+                            industry_map[row['ts_code']] = row.get('industry', '未知')
+            except Exception as e:
+                logger.warning(f"批量获取行业信息失败: {e}，将使用默认值")
+        
+        for p in positions:
+            # 获取股票行业信息
+            industry = getattr(p, 'industry', None)
+            if industry is None:
+                industry = industry_map.get(p.symbol, '未知')
+            
+            if industry:
+                sector_weights[industry] = sector_weights.get(industry, 0.0) + (p.market_value / summary.total_market_value if summary.total_market_value > 0 else 0.0)
+        
+        # 行业集中度 = 最大行业权重
+        sector_concentration = max(sector_weights.values()) if sector_weights else 0.0
         
         # 波动率风险 - 基于持仓盈亏率的波动
         pnl_rates = [p.unrealized_pnl_pct for p in positions]
@@ -368,9 +397,52 @@ class PositionAnalyzer:
         return sorted_positions[:top_n]
     
     def calculate_sector_distribution(self, positions: List[Position]) -> Dict[str, float]:
-        """计算行业分布"""
-        # 简化处理，实际应该根据股票代码获取行业信息
-        sector_distribution = {"其他": 100.0}
+        """
+        计算行业分布（各行业持仓占比）
+        
+        Returns:
+            Dict[str, float]: 行业名称 -> 持仓占比（百分比）
+        """
+        if not positions:
+            return {}
+        
+        # 计算总市值
+        total_value = sum(p.market_value for p in positions if hasattr(p, 'market_value'))
+        if total_value == 0:
+            return {}
+        
+        # 批量获取行业信息，避免重复API调用
+        symbols_to_query = [p.symbol for p in positions if not hasattr(p, 'industry') or getattr(p, 'industry', None) is None]
+        industry_map = {}
+        
+        if symbols_to_query:
+            try:
+                # 批量查询行业信息（tushare支持逗号分隔的多个ts_code）
+                batch_size = 100
+                for i in range(0, len(symbols_to_query), batch_size):
+                    batch_symbols = symbols_to_query[i:i + batch_size]
+                    stock_info = self.pro.stock_basic(ts_code=','.join(batch_symbols), fields='ts_code,industry')
+                    if not stock_info.empty:
+                        for _, row in stock_info.iterrows():
+                            industry_map[row['ts_code']] = row.get('industry', '未知')
+            except Exception as e:
+                logger.warning(f"批量获取行业信息失败: {e}，将使用默认值")
+        
+        sector_values = {}
+        for p in positions:
+            # 获取股票行业信息
+            industry = getattr(p, 'industry', None)
+            if industry is None:
+                industry = industry_map.get(p.symbol, '未知')
+            
+            sector_values[industry] = sector_values.get(industry, 0.0) + p.market_value
+        
+        # 转换为百分比
+        sector_distribution = {
+            industry: round(value / total_value * 100, 2) 
+            for industry, value in sector_values.items()
+        }
+        
         return sector_distribution
     
     def calculate_performance_metrics(self, positions: List[Position], summary: PositionSummary) -> Dict[str, float]:

@@ -51,18 +51,78 @@ def setup_scheduler():
     # 只添加任务，不再start调度器
 
 def get_history_func(symbol, tushare_token=None):
-    """用Tushare获取历史行情，返回DataFrame"""
+    """用Tushare获取历史行情，返回DataFrame
+    
+    自动识别股票和指数，使用相应的API：
+    - 股票：使用 daily API
+    - 指数：使用 index_daily API
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if tushare_token is None:
-        raise ValueError("tushare_token未设置")
+        logger.error(f"获取{symbol}历史行情失败: tushare_token未设置")
+        return None
+    
     pro = ts.pro_api(tushare_token)
+    
+    # 判断是股票还是指数
+    # 常见指数代码：000001.SH(上证), 399001.SZ(深证), 399006.SZ(创业板), 000905.SH(中证500)
+    # 指数代码特征：以399开头或000001/000905等特定代码
+    is_index = (
+        symbol.startswith('399') or  # 深证指数（399001, 399006等）
+        symbol in ['000001.SH', '000905.SH', '000300.SH', '000016.SH', '000852.SH'] or  # 上证指数
+        symbol.endswith('.SH') and symbol.startswith('000')  # 其他上证指数
+    )
+    
     try:
-        df = pro.daily(ts_code=symbol, start_date='20240101', end_date='20991231')
-        if not df.empty:
-            df = df.sort_values('trade_date')
-            df['close'] = df['close'].astype(float)
+        # 计算合理的日期范围（至少获取250个交易日，约1年）
+        from datetime import datetime, timedelta
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date = (datetime.now() - timedelta(days=400)).strftime('%Y%m%d')  # 多取一些确保有足够数据
+        
+        logger.debug(f"尝试获取{symbol}历史行情 ({'指数' if is_index else '股票'}): {start_date} 至 {end_date}")
+        
+        # 根据类型选择API
+        if is_index:
+            df = pro.index_daily(ts_code=symbol, start_date=start_date, end_date=end_date)
+        else:
+            df = pro.daily(ts_code=symbol, start_date=start_date, end_date=end_date)
+        
+        if df is None or df.empty:
+            # 如果第一次尝试失败，可能是判断错误，尝试另一个API
+            if is_index:
+                logger.debug(f"指数API失败，尝试股票API: {symbol}")
+                df = pro.daily(ts_code=symbol, start_date=start_date, end_date=end_date)
+            else:
+                logger.debug(f"股票API失败，尝试指数API: {symbol}")
+                df = pro.index_daily(ts_code=symbol, start_date=start_date, end_date=end_date)
+            
+            if df is None or df.empty:
+                logger.warning(f"获取{symbol}历史行情失败: Tushare返回空数据，代码: {symbol}")
+                return None
+        
+        # 检查必需的列
+        required_cols = ['trade_date', 'close']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        if missing_cols:
+            logger.warning(f"获取{symbol}历史行情失败: 缺少必需列 {missing_cols}，可用列: {df.columns.tolist()}")
+            return None
+        
+        df = df.sort_values('trade_date')
+        df['close'] = df['close'].astype(float)
+        
+        # 如果有volume列，也转换为float
+        if 'volume' in df.columns:
+            df['volume'] = df['volume'].astype(float)
+        elif 'vol' in df.columns:
+            # Tushare可能返回vol而不是volume
+            df['volume'] = df['vol'].astype(float)
+        
+        logger.debug(f"成功获取{symbol}历史行情: {len(df)}条记录，日期范围: {df['trade_date'].min()} 至 {df['trade_date'].max()}")
         return df
     except Exception as e:
-        print(f"获取{symbol}历史行情失败: {e}")
+        logger.error(f"获取{symbol}历史行情失败: {e}", exc_info=True)
         return None
 
 def get_latest_price_func(symbol, xt_trader=None):

@@ -44,6 +44,9 @@ from modules.data_service.api.rest_api import BarDataAPI
 from modules.tornadoapp.position.position_api import add_position_handlers
 from modules.stock_selector.api import add_stock_selector_handlers
 from modules.tornadoapp.controller.swagger_handler import SwaggerUIHandler, OpenAPIHandler
+from modules.tornadoapp.controller.scheduler_handler import (
+    SchedulerJobHandler, SchedulerJobControlHandler, SchedulerStatsHandler
+)
 
 
 # 定义路由
@@ -98,6 +101,12 @@ routes = [
     (r"/api/audit/logs", AuditLogHandler),
     (r"/api/audit/export", AuditExportHandler),
     (r"/api/bar_data", BarDataAPI),
+    
+    # 定时任务管理路由
+    (r"/api/scheduler/jobs", SchedulerJobHandler),
+    (r"/api/scheduler/jobs/([^/]+)", SchedulerJobHandler),
+    (r"/api/scheduler/jobs/([^/]+)/(pause|resume|trigger)", SchedulerJobControlHandler),
+    (r"/api/scheduler/stats", SchedulerStatsHandler),
 ]
 
 # 创建带中间件的应用

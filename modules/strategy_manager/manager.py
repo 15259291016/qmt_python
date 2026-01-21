@@ -389,22 +389,57 @@ class StrategyManager:
                 # 检查持仓
                 positions = self.xt_trader.query_stock_positions(account)
                 current_position = 0
+                available_volume = 0
                 for pos in positions:
                     if pos.stock_code == symbol:
                         current_position = pos.volume
+                        # 获取可用持仓（优先使用enable_amount，考虑T+1限制）
+                        available_volume = getattr(pos, 'enable_amount', None)
+                        if available_volume is None:
+                            available_volume = getattr(pos, 'm_nCanUseVolume', None)
+                        if available_volume is None:
+                            available_volume = current_position
+                        try:
+                            available_volume = int(available_volume)
+                        except (ValueError, TypeError):
+                            available_volume = 0
                         break
                 
-                if current_position > 0:  # 有持仓才卖出
+                # T+1规则检查：当日买入的股票不能当日卖出
+                if available_volume <= 0:
+                    self._log_strategy_event(
+                        strategy_name, "WARNING",
+                        f"卖出信号跳过: {symbol}，无可用持仓（T+1限制），总持仓={current_position}股",
+                        {'symbol': symbol, 'action': 'sell_skipped', 'reason': 'T+1_restriction', 'total_volume': current_position}
+                    )
+                elif current_position > 0:  # 有持仓才卖出
                     price = data['close']
-                    quantity = current_position
+                    # 使用可用持仓数量，而不是总持仓
+                    # 卖出限制：一笔最大100万股
+                    MAX_SELL_QUANTITY = 1000000
+                    quantity = min(available_volume, MAX_SELL_QUANTITY)
                     
+                    # 注意：order_manager.create_order 会自动调整数量为100的整数倍
+                    if quantity > MAX_SELL_QUANTITY:
+                        self._log_strategy_event(
+                            strategy_name, "WARNING",
+                            f"卖出数量{available_volume}股超过单笔最大限制{MAX_SELL_QUANTITY}股，限制为{quantity}股",
+                            {'symbol': symbol, 'action': 'sell_quantity_limited', 'original_quantity': available_volume, 'limited_quantity': quantity}
+                        )
                     order = self.order_manager.create_order(symbol, "卖", price, quantity, account)
                     
-                    self._log_strategy_event(
-                        strategy_name, "INFO",
-                        f"卖出信号执行: {symbol}, 价格: {price}, 数量: {quantity}",
-                        {'symbol': symbol, 'action': 'sell', 'price': price, 'quantity': quantity, 'order': order}
-                    )
+                    if order:
+                        self._log_strategy_event(
+                            strategy_name, "INFO",
+                            f"卖出信号执行: {symbol}, 价格: {price}, 数量: {quantity}（可用持仓，总持仓={current_position}）",
+                            {'symbol': symbol, 'action': 'sell', 'price': price, 'quantity': quantity, 'total_volume': current_position, 'order': order}
+                        )
+                    else:
+                        self._log_strategy_event(
+                            strategy_name, "ERROR",
+                            f"卖出信号执行失败: {symbol}, 价格: {price}, 数量: {quantity}",
+                            {'symbol': symbol, 'action': 'sell_failed', 'price': price, 'quantity': quantity}
+                        )
                     
         except Exception as e:
             logger.error(f"执行信号失败: {e}")

@@ -214,11 +214,31 @@ class AdvancedStockSellingStrategy:
                 if self.data.iloc[-1]['Signal'] == -1:
                     # 卖出前校验可用持仓
                     enable_amount = getattr(position, 'enable_amount', 0)
-                    sell_volume = min(100000, int(enable_amount))
-                    if enable_amount > 0:
+                    if enable_amount is None:
+                        enable_amount = getattr(position, 'm_nCanUseVolume', 0)
+                    try:
+                        enable_amount = int(enable_amount)
+                    except (ValueError, TypeError):
+                        enable_amount = 0
+                    
+                    # T+1规则检查
+                    if enable_amount <= 0:
+                        print(f"无可用持仓（T+1限制），跳过卖出: {position.stock_code}，总持仓={position.volume}股")
+                        continue
+                    
+                    # A股交易规则：最小委托单位100股，必须是100的整数倍
+                    # 卖出限制：一笔最大100万股
+                    min_unit = 100
+                    MAX_SELL_QUANTITY = 1000000
+                    sell_volume = min(MAX_SELL_QUANTITY, enable_amount)  # 限制最大卖出数量
+                    sell_volume = (sell_volume // min_unit) * min_unit  # 调整为100的整数倍
+                    
+                    if sell_volume >= min_unit:
+                        # 注意：order_manager.create_order 也会再次验证和调整数量
                         self.order_manager.create_order(position.stock_code, "卖", float(self.data.iloc[-1]['Close']), sell_volume, self.acc)
+                        print(f"卖出: {position.stock_code}, 数量: {sell_volume}股（可用{enable_amount}股，总持仓{position.volume}股）")
                     else:
-                        print(f"无可用持仓，跳过卖出: {position.stock_code}")
+                        print(f"可用持仓{enable_amount}股不足100股，无法卖出: {position.stock_code}")
             position = self.data.iloc[-1]['Close'] * position.volume - position.avg_price * position.volume
         else:
             position = self.initial_capital

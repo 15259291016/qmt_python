@@ -312,11 +312,29 @@ def judge_market_trend_comprehensive(
         
         for idx_code in index_codes:
             try:
+                logger.debug(f"[市场趋势] 开始获取指数 {idx_code} 的历史数据...")
                 df = get_history_func(idx_code)
+                
+                # 检查数据是否为空或None
+                if df is None:
+                    logger.warning(f"[市场趋势] 指数 {idx_code} 数据获取失败：get_history_func返回None")
+                    continue
+                
+                if df.empty:
+                    logger.warning(f"[市场趋势] 指数 {idx_code} 数据获取失败：返回空DataFrame")
+                    continue
+                
+                # 检查必需的列
+                required_cols = ['close', 'volume']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                if missing_cols:
+                    logger.warning(f"[市场趋势] 指数 {idx_code} 缺少必需列: {missing_cols}，可用列: {df.columns.tolist()}")
+                    continue
+                
                 quality = _validate_data_quality(df, min_length=60)
                 
                 if not quality['valid']:
-                    logger.warning(f"[市场趋势] 指数 {idx_code} 数据质量不足: {quality['issues']}")
+                    logger.warning(f"[市场趋势] 指数 {idx_code} 数据质量不足: {quality['issues']}，数据长度: {len(df)}")
                     continue
                 
                 # 计算增强均线指标
@@ -374,7 +392,7 @@ def judge_market_trend_comprehensive(
                     'quality_score': quality['quality_score']
                 }
             except Exception as e:
-                logger.warning(f"[市场趋势] 处理指数 {idx_code} 失败: {e}")
+                logger.warning(f"[市场趋势] 处理指数 {idx_code} 失败: {e}", exc_info=True)
                 continue
         
         if index_ma_scores:
@@ -388,8 +406,10 @@ def judge_market_trend_comprehensive(
                             'strong_bear' if avg_ma_score < -0.7 else 'bear' if avg_ma_score < -0.3 else 'neutral'
             }
             scores.append(avg_ma_score * 0.35)
+            logger.debug(f"[市场趋势] 均线系统得分: {avg_ma_score:.3f} (权重35%), 指数数量: {len(index_ma_scores)}")
         else:
             factors['ma_system'] = {'score': 0.0, 'error': '所有指数数据不足'}
+            logger.warning(f"[市场趋势] 均线系统: 所有指数数据获取失败，无法计算均线得分")
         
         # ========== 2. 恐贪指数（权重30%）- 优化版 ==========
         # 加权平均：当日0.6，长期0.4（更重视当日情绪）
@@ -421,6 +441,7 @@ def judge_market_trend_comprehensive(
             'is_divergence': is_divergence
         }
         scores.append(fg_score * 0.3)
+        logger.debug(f"[市场趋势] 恐贪指数得分: {fg_score:.3f} (权重30%), 当日={fear_greed_index:.1f}, 长期={long_term_fear_greed_index:.1f}, 加权={weighted_fear_greed:.1f}")
         
         # ========== 3. 多周期涨跌幅（权重20%） ==========
         # 使用主要指数（上证）计算多周期涨跌幅
@@ -428,10 +449,26 @@ def judge_market_trend_comprehensive(
         for idx_code in index_codes:
             try:
                 df = get_history_func(idx_code)
-                if _validate_data_quality(df, min_length=120)['valid']:
+                
+                # 检查数据是否为空或None
+                if df is None or df.empty:
+                    logger.debug(f"[市场趋势] 指数 {idx_code} 数据获取失败（多周期涨跌幅），尝试下一个指数")
+                    continue
+                
+                # 检查必需的列
+                if 'close' not in df.columns:
+                    logger.debug(f"[市场趋势] 指数 {idx_code} 缺少close列（多周期涨跌幅），尝试下一个指数")
+                    continue
+                
+                quality = _validate_data_quality(df, min_length=120)
+                if quality['valid']:
                     main_df = df
+                    logger.debug(f"[市场趋势] 使用指数 {idx_code} 计算多周期涨跌幅，数据长度: {len(df)}")
                     break
-            except:
+                else:
+                    logger.debug(f"[市场趋势] 指数 {idx_code} 数据质量不足（多周期涨跌幅）: {quality['issues']}，数据长度: {len(df)}")
+            except Exception as e:
+                logger.debug(f"[市场趋势] 处理指数 {idx_code} 失败（多周期涨跌幅）: {e}")
                 continue
         
         if main_df is not None:
@@ -471,13 +508,16 @@ def judge_market_trend_comprehensive(
                                    all(r < 0 for r in multi_returns.values()) else 'low'
                 }
                 scores.append(final_return_score * 0.2)
+                logger.debug(f"[市场趋势] 多周期涨跌幅得分: {final_return_score:.3f} (权重20%), 涨跌幅: {multi_returns}")
             else:
                 factors['index_return'] = {'score': 0.0, 'error': '无法计算多周期涨跌幅'}
+                logger.warning(f"[市场趋势] 多周期涨跌幅: 无法计算，multi_returns为空")
         else:
             factors['index_return'] = {'score': 0.0, 'error': '主要指数数据不足'}
+            logger.warning(f"[市场趋势] 多周期涨跌幅: 主要指数数据不足，无法获取120日历史数据")
         
         # ========== 4. 成交量+价格方向（权重15%）- 优化版 ==========
-        if main_df is not None and len(main_df) >= 20:
+        if main_df is not None and len(main_df) >= 20 and 'volume' in main_df.columns:
             # 成交量比率
             vol_ratio = main_df['volume'].iloc[-5:].mean() / main_df['volume'].iloc[-20:-5].mean()
             
@@ -512,12 +552,27 @@ def judge_market_trend_comprehensive(
                          '缩量下跌' if vol_ratio < 0.8 and price_change_5d < -1 else '正常'
             }
             scores.append(vol_score * 0.15)
+            logger.debug(f"[市场趋势] 成交量得分: {vol_score:.3f} (权重15%), 量比={vol_ratio:.2f}, 5日涨跌={price_change_5d:.2f}%")
         else:
             factors['volume'] = {'score': 0.0, 'error': '数据不足'}
+            logger.warning(f"[市场趋势] 成交量: 数据不足，无法计算成交量指标")
         
         # ========== 综合得分 ==========
+        # 如果所有因子都失败，至少使用恐贪指数作为降级方案
+        if not scores and 'fear_greed' in factors:
+            fear_greed_data = factors['fear_greed']
+            if isinstance(fear_greed_data, dict) and 'score' in fear_greed_data:
+                fg_score = fear_greed_data['score']
+                scores.append(fg_score * 0.5)  # 降低权重，因为只有单一因子
+                logger.warning(f"[市场趋势] 所有技术指标因子失败，仅使用恐贪指数作为降级方案: {fg_score:.3f}")
+        
         total_score = sum(scores) if scores else 0.0
         confidence = min(abs(total_score), 1.0)
+        
+        # 如果得分来源单一（只有恐贪指数），降低置信度
+        if len(scores) == 1:
+            confidence *= 0.6  # 单一因子置信度降低
+            logger.warning(f"[市场趋势] 仅有一个因子可用，置信度降低至 {confidence:.2f}")
         
         # 动态阈值：根据数据质量调整
         data_quality_avg = sum([f.get('quality_score', 1.0) for f in factors.values() 
@@ -525,7 +580,49 @@ def judge_market_trend_comprehensive(
                                if isinstance(f, dict) and 'quality_score' in f]))
         
         # 数据质量高时使用标准阈值，质量低时放宽阈值
-        threshold = 0.3 if data_quality_avg > 0.8 else 0.25
+        # 如果数据质量很低，进一步放宽阈值，避免误判
+        if data_quality_avg < 0.3:
+            threshold = 0.15  # 数据质量很低时，使用更宽松的阈值
+        elif data_quality_avg < 0.6:
+            threshold = 0.2
+        else:
+            threshold = 0.3 if data_quality_avg > 0.8 else 0.25
+        
+        # 调试日志：输出各因子得分详情
+        logger.debug(f"[市场趋势] 各因子得分详情:")
+        logger.debug(f"  - scores列表: {scores}")
+        logger.debug(f"  - scores数量: {len(scores)}")
+        logger.debug(f"  - 总得分: {total_score}")
+        logger.debug(f"  - 各因子详情: {factors}")
+        logger.debug(f"  - 数据质量平均分: {data_quality_avg}")
+        logger.debug(f"  - 使用的阈值: {threshold}")
+        
+        # 统计失败的因子数量
+        failed_factors = [name for name, data in factors.items() 
+                         if isinstance(data, dict) and 'error' in data]
+        successful_factors = [name for name, data in factors.items() 
+                             if isinstance(data, dict) and 'score' in data and 'error' not in data]
+        
+        # 如果得分接近0，输出警告
+        if abs(total_score) < 0.01:
+            logger.warning(f"[市场趋势] 综合得分接近0 ({total_score:.4f})，可能原因：")
+            logger.warning(f"  - 成功的因子: {successful_factors} ({len(successful_factors)}个)")
+            logger.warning(f"  - 失败的因子: {failed_factors} ({len(failed_factors)}个)")
+            logger.warning(f"  - 各因子得分列表: {scores}")
+            if not scores:
+                logger.warning(f"  - scores列表为空，所有因子可能都失败了")
+            else:
+                for i, score in enumerate(scores):
+                    logger.warning(f"  - 因子{i+1}得分: {score}")
+            # 检查各因子是否有错误
+            for factor_name in failed_factors:
+                factor_data = factors[factor_name]
+                logger.warning(f"  - {factor_name}因子错误: {factor_data.get('error', '未知错误')}")
+        
+        # 如果失败因子过多，给出建议
+        if len(failed_factors) >= 2:
+            logger.warning(f"[市场趋势] 警告：{len(failed_factors)}个因子失败，市场趋势判断可能不准确")
+            logger.warning(f"  建议：检查Tushare Token和数据源连接")
         
         # 判断趋势
         if total_score > threshold:
@@ -535,6 +632,19 @@ def judge_market_trend_comprehensive(
         else:
             trend = 'neutral'  # 震荡市
         
+        # 生成描述信息（根据数据质量调整）
+        base_descriptions = {
+            'bull': '牛市：市场情绪乐观，多指数上涨，均线多头排列',
+            'bear': '熊市：市场情绪悲观，多指数下跌，均线空头排列',
+            'neutral': '震荡市：市场方向不明确，多空力量均衡'
+        }
+        
+        description = base_descriptions[trend]
+        if len(failed_factors) >= 2:
+            description += f"（数据不足：{len(failed_factors)}个因子失败，判断准确性较低）"
+        elif len(successful_factors) < 2:
+            description += f"（数据部分可用：仅{len(successful_factors)}个因子成功）"
+        
         return {
             'trend': trend,
             'confidence': confidence,
@@ -542,11 +652,10 @@ def judge_market_trend_comprehensive(
             'threshold_used': threshold,
             'data_quality_avg': data_quality_avg,
             'factors': factors,
-            'description': {
-                'bull': '牛市：市场情绪乐观，多指数上涨，均线多头排列',
-                'bear': '熊市：市场情绪悲观，多指数下跌，均线空头排列',
-                'neutral': '震荡市：市场方向不明确，多空力量均衡'
-            }[trend]
+            'scores_detail': scores,  # 添加详细得分列表
+            'successful_factors': successful_factors,
+            'failed_factors': failed_factors,
+            'description': description
         }
     except Exception as e:
         logger.error(f"判断市场趋势失败: {e}", exc_info=True)
@@ -768,8 +877,17 @@ async def monitor_positions_and_trade_multi_strategy(
             ])
             
             summary = analysis.summary
-            fear_greed_index = getattr(summary, 'fear_greed_index', 50)
-            long_term_fear_greed_index = getattr(summary, 'long_term_fear_greed_index', 50)
+            fear_greed_index = getattr(summary, 'fear_greed_index', None)
+            long_term_fear_greed_index = getattr(summary, 'long_term_fear_greed_index', None)
+            
+            # 如果恐贪指数为None，使用默认值50，但记录警告
+            if fear_greed_index is None:
+                fear_greed_index = 50
+                logger.warning(f"[恐贪指数] 当日恐贪指数为None，使用默认值50（可能数据获取失败）")
+            if long_term_fear_greed_index is None:
+                long_term_fear_greed_index = fear_greed_index if fear_greed_index is not None else 50
+                logger.warning(f"[恐贪指数] 长期恐贪指数为None，使用当日值或默认值50")
+            
             print(f"[恐贪指数] 当日: {fear_greed_index:.1f}，长期: {long_term_fear_greed_index:.1f}")
             
             # 综合判断市场趋势（牛市/熊市/震荡市）- 使用多指数综合判断
@@ -783,6 +901,26 @@ async def monitor_positions_and_trade_multi_strategy(
             
             logger.info(f"[市场趋势] {market_trend['trend']} ({market_trend['description']})，"
                        f"置信度={market_trend['confidence']:.2f}，综合得分={market_trend['score']:.2f}")
+            
+            # 输出详细的因子得分信息
+            if 'factors' in market_trend:
+                factors_info = []
+                for name, data in market_trend['factors'].items():
+                    if isinstance(data, dict):
+                        score = data.get('score', 0.0)
+                        if 'error' in data:
+                            factors_info.append(f"{name}: 错误({data['error']})")
+                        else:
+                            factors_info.append(f"{name}: {score:.3f}")
+                if factors_info:
+                    logger.info(f"[市场趋势] 各因子得分: {', '.join(factors_info)}")
+                    print(f"[市场趋势] 各因子得分: {', '.join(factors_info)}")
+            
+            # 如果有错误，输出错误信息
+            if 'error' in market_trend:
+                logger.error(f"[市场趋势] 判断失败: {market_trend['error']}")
+                print(f"[市场趋势] 判断失败: {market_trend['error']}")
+            
             print(f"[市场趋势] {market_trend['trend']}，置信度={market_trend['confidence']:.2f}，得分={market_trend['score']:.2f}")
             
             # 根据市场趋势动态调整止盈阈值
@@ -822,6 +960,7 @@ async def monitor_positions_and_trade_multi_strategy(
             # 定义选股时间段列表
             stock_selection_periods = [
                 (time(9, 50), time(10, 0)),   # 早上9:50-10:00
+                (time(13, 35), time(13, 40)),   # 早上9:50-10:00
                 (time(14, 20), time(14, 30))  # 下午14:20-14:30
             ]
             # 检查当前时间是否在任一选股时间段内
@@ -963,7 +1102,27 @@ async def monitor_positions_and_trade_multi_strategy(
                     
                     avg_price = getattr(p, 'avg_price', current_price)  # 成本价
                     total_volume = p.volume  # 总持仓
-                    available_volume = getattr(p, 'enable_amount', p.volume)  # 可用持仓（已考虑T+1规则）
+                    # 获取可用持仓（优先使用enable_amount，如果不存在则使用volume，但需要验证）
+                    available_volume = getattr(p, 'enable_amount', None)
+                    if available_volume is None:
+                        # 如果enable_amount不存在，尝试其他可能的属性名
+                        available_volume = getattr(p, 'm_nCanUseVolume', None)
+                    if available_volume is None:
+                        # 如果都不存在，使用volume，但记录警告
+                        available_volume = total_volume
+                        logger.warning(f"{symbol}: 无法获取可用持仓数量，使用总持仓{total_volume}股（可能存在T+1限制风险）")
+                    
+                    # 确保available_volume是整数且合理
+                    try:
+                        available_volume = int(available_volume)
+                    except (ValueError, TypeError):
+                        logger.error(f"{symbol}: 可用持仓数量格式错误: {available_volume}，跳过卖出检查")
+                        continue
+                    
+                    # 验证数量合理性（防止异常大的数量）
+                    if available_volume > total_volume * 2:
+                        logger.error(f"{symbol}: 可用持仓数量异常: {available_volume} > 总持仓{total_volume}*2，跳过卖出检查")
+                        continue
                     
                     # T+1规则检查：当日买入的股票不能当日卖出
                     if available_volume <= 0:
@@ -1099,8 +1258,27 @@ async def monitor_positions_and_trade_multi_strategy(
                         # 执行卖出：只卖出可用持仓（已考虑T+1规则）
                         # 注意：available_volume 已经由券商计算，排除了当日买入的股票
                         if available_volume > 0:
-                            await order_manager(symbol, "卖", current_price, available_volume, account)
-                            logger.info(f"[多策略卖出] {symbol}: 已提交卖出订单，数量={available_volume}股（总持仓{total_volume}股），价格={current_price:.2f}")
+                            # A股交易规则：最小委托单位100股，必须是100的整数倍
+                            # 将卖出数量调整为100的整数倍（向下取整）
+                            min_unit = 100
+                            # 卖出限制：一笔最大100万股
+                            MAX_SELL_QUANTITY = 1000000
+                            sell_quantity = min(available_volume, MAX_SELL_QUANTITY)
+                            sell_quantity = (sell_quantity // min_unit) * min_unit
+                            
+                            if sell_quantity < min_unit:
+                                logger.warning(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股不足100股，无法卖出（A股最小委托单位100股）")
+                                print(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股不足100股，无法卖出")
+                            else:
+                                if sell_quantity < available_volume:
+                                    if available_volume > MAX_SELL_QUANTITY:
+                                        logger.info(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股超过单笔最大限制{MAX_SELL_QUANTITY}股，限制为{sell_quantity}股")
+                                    else:
+                                        logger.info(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股，调整为{sell_quantity}股（100的整数倍）")
+                                    print(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股，调整为{sell_quantity}股（100的整数倍）")
+                                
+                                await order_manager(symbol, "卖", current_price, sell_quantity, account)
+                                logger.info(f"[多策略卖出] {symbol}: 已提交卖出订单，数量={sell_quantity}股（可用{available_volume}股，总持仓{total_volume}股），价格={current_price:.2f}")
                         else:
                             logger.warning(f"[多策略卖出] {symbol}: 无可用持仓（T+1限制），无法卖出")
                             print(f"[T+1限制] {symbol}: 当日买入的股票不能当日卖出，无法执行卖出订单")
@@ -1188,32 +1366,67 @@ async def monitor_positions_and_trade(
                 if fear_greed_index < 10:
                     print(f"[卖出决策] 极端恐慌({fear_greed_index:.1f})，禁止卖出 {symbol}，建议耐心等待情绪修复。")
                     continue
+                # 获取可用持仓数量（统一处理）
+                available_volume = getattr(p, 'm_nCanUseVolume', None)
+                if available_volume is None:
+                    available_volume = getattr(p, 'enable_amount', None)
+                if available_volume is None:
+                    available_volume = p.volume
+                
+                # 确保是整数且合理
+                try:
+                    available_volume = int(available_volume)
+                except (ValueError, TypeError):
+                    logger.error(f"[卖出] {symbol}: 可用持仓数量格式错误: {available_volume}，跳过")
+                    continue
+                
+                # 验证数量合理性
+                if available_volume > p.volume * 2:
+                    logger.error(f"[卖出] {symbol}: 可用持仓数量异常: {available_volume} > 总持仓{p.volume}*2，跳过")
+                    continue
+                
+                # T+1规则检查
+                if available_volume <= 0:
+                    logger.info(f"[卖出] {symbol}: 无可用持仓（T+1限制），总持仓={p.volume}股，跳过")
+                    continue
+                
+                # A股交易规则：最小委托单位100股，必须是100的整数倍
+                # 卖出限制：一笔最大100万股
+                min_unit = 100
+                MAX_SELL_QUANTITY = 1000000
+                sell_quantity = min(available_volume, MAX_SELL_QUANTITY)
+                sell_quantity = (sell_quantity // min_unit) * min_unit
+                
+                if sell_quantity < min_unit:
+                    logger.warning(f"[卖出] {symbol}: 可用持仓{available_volume}股不足100股，无法卖出")
+                    continue
+                
                 # 恐慌区间仅允许止损卖出
                 if 10 <= fear_greed_index < 20:
                     if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
                         pnl = (current_price - p.avg_price) / p.avg_price * 100
                         if pnl < -5:
-                            await order_manager(symbol, "卖", current_price, p.m_nCanUseVolume, account)
-                            print(f"[卖出决策] 恐慌区间({fear_greed_index:.1f})，仅允许止损卖出 {symbol} 价格: {current_price}")
+                            await order_manager(symbol, "卖", current_price, sell_quantity, account)
+                            print(f"[卖出决策] 恐慌区间({fear_greed_index:.1f})，仅允许止损卖出 {symbol} 价格: {current_price}, 数量: {sell_quantity}股")
                         else:
                             print(f"[卖出决策] 恐慌区间({fear_greed_index:.1f})，非止损不卖出 {symbol}")
                     continue
                 # 极端贪婪下允许加大卖出
                 if fear_greed_index > 90 or long_term_fear_greed_index > 90:
                     if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
-                        await order_manager(symbol, "卖", current_price, p.m_nCanUseVolume, account)
-                        print(f"[卖出决策] 极端贪婪({fear_greed_index:.1f})，加大卖出 {symbol} 价格: {current_price}，建议锁定收益。")
+                        await order_manager(symbol, "卖", current_price, sell_quantity, account)
+                        print(f"[卖出决策] 极端贪婪({fear_greed_index:.1f})，加大卖出 {symbol} 价格: {current_price}, 数量: {sell_quantity}股，建议锁定收益。")
                     continue
                 # 80-90区间正常卖出
                 if 80 < fear_greed_index <= 90 or 80 < long_term_fear_greed_index <= 90:
                     if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
-                        await order_manager(symbol, "卖", current_price, p.m_nCanUseVolume, account)
-                        print(f"[卖出决策] 贪婪区间({fear_greed_index:.1f})，正常卖出 {symbol} 价格: {current_price}")
+                        await order_manager(symbol, "卖", current_price, sell_quantity, account)
+                        print(f"[卖出决策] 贪婪区间({fear_greed_index:.1f})，正常卖出 {symbol} 价格: {current_price}, 数量: {sell_quantity}股")
                     continue
                 # 其它情况正常卖出
-                if p.m_nCanUseVolume != 0 and technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
-                    await order_manager(symbol, "卖", current_price, p.m_nCanUseVolume, account)
-                    print(f"[自动卖出] {symbol} 价格: {current_price}")
+                if technical_analyzer.is_sell_signal(indicators, avg_price=p.avg_price, current_price=current_price):
+                    await order_manager(symbol, "卖", current_price, sell_quantity, account)
+                    print(f"[自动卖出] {symbol} 价格: {current_price}, 数量: {sell_quantity}股")
             # 3. 选股池自动买入（自适应热点行业）
             try:
                 selected_codes = stock_selector.select_by_hot_industry()

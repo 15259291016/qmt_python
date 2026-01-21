@@ -7,6 +7,7 @@ from modules.tornadoapp.model.demomodel import DemoModel
 from modules.tornadoapp.model.user_model import User, UserSession
 from modules.tornadoapp.model.permission_model import Role, Permission, UserRole, PermissionGroup
 from modules.tornadoapp.model.wx_bind import WxBind
+from modules.tornadoapp.model.scheduler_model import ScheduledJob
 
 # 加载环境变量
 load_dotenv()
@@ -59,7 +60,8 @@ async def init_beanie():
             UserRole,
             PermissionGroup,
             WxBind,
-            DemoModel
+            DemoModel,
+            ScheduledJob
         ]
     )
 

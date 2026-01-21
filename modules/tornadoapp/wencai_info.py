@@ -344,7 +344,8 @@ async def main():
     """主程序入口"""
     question_list = []
     # question_list.append("突破十日均线，散户数量下降")
-    question_list.append("突破十日均线，散户数量下降，龙头股，剔除st")
+    # question_list.append("突破十日均线，散户数量下降，龙头股，剔除st")
+    question_list.append("资金扎堆涌入的票,剔除ST，剔除京交所，连续上涨，当下热点")
     
     # 使用异步函数获取股票列表（包含详细信息）
     stock_info_list = await async_select_stocks_by_wencai(
