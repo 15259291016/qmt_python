@@ -298,12 +298,6 @@ async def run_trader_system(path, account, environment='SIMULATION'):
     except Exception as e:
         logger.error(f"多策略量化交易系统启动失败: {e}")
         raise
-    finally:
-        try:
-            scheduler.shutdown()
-            logger.info("调度器已关闭")
-        except Exception as e:
-            logger.error(f"调度器关闭失败: {e}")
 
 async def trader_thread_func(path, account, environment):
     await run_trader_system(path, account, environment)
@@ -378,7 +372,15 @@ async def main_async():
     logger.info("QMT交易连接消息循环已启动")
     
     # 优雅保活，主事件循环不退出
-    await asyncio.Event().wait()
+    try:
+        await asyncio.Event().wait()
+    finally:
+        try:
+            if scheduler.running:
+                scheduler.shutdown()
+                logger.info("调度器已关闭")
+        except Exception as e:
+            logger.error(f"调度器关闭失败: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main_async())
