@@ -173,12 +173,45 @@ class OrderCallbackHandler:
     def on_order_stock_async_response(self, response):
         try:
             print("on_order_stock_async_response", response)
+            
+            # 记录 response 对象的详细信息（用于调试）
+            response_attrs = {}
+            if hasattr(response, '__dict__'):
+                response_attrs = response.__dict__
+            else:
+                # 尝试获取所有属性
+                for attr in dir(response):
+                    if not attr.startswith('_'):
+                        try:
+                            response_attrs[attr] = getattr(response, attr)
+                        except:
+                            pass
+            
+            logging.info(f"[订单回调] response 对象属性: {response_attrs}")
+            print(f"[订单回调] response 对象属性: {response_attrs}")
+            
             order_id = getattr(response, 'order_id', None)
             status = getattr(response, 'order_status', None)
             error_msg = getattr(response, 'error_msg', '')
             filled = getattr(response, 'filled', 0)
             price = getattr(response, 'price', 0)
             symbol = getattr(response, 'stock_code', '')
+            
+            # 增强日志记录
+            logging.info(f"[订单回调] 订单ID={order_id}, 状态={status}, 错误信息={error_msg}, "
+                        f"成交数量={filled}, 价格={price}, 股票代码={symbol}")
+            print(f"[订单回调详情] 订单ID={order_id}, 状态={status}, 错误信息={error_msg}, "
+                  f"成交数量={filled}, 价格={price}, 股票代码={symbol}")
+            
+            # 如果订单ID为-1或None，说明订单提交失败
+            if order_id == -1 or order_id is None:
+                logging.error(f"[订单回调] 订单提交失败: order_id={order_id}, 状态={status}, 错误信息={error_msg}")
+                print(f"[订单回调错误] 订单提交失败: order_id={order_id}, 状态={status}, 错误信息={error_msg}")
+            
+            # 如果状态为None，记录警告
+            if status is None:
+                logging.warning(f"[订单回调] 订单状态为None: order_id={order_id}, 可能是订单提交失败或状态未更新")
+                print(f"[订单回调警告] 订单状态为None: order_id={order_id}, 可能是订单提交失败或状态未更新")
 
             # 1. 订单状态管理
             if order_id:

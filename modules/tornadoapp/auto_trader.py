@@ -1031,6 +1031,15 @@ async def monitor_positions_and_trade_multi_strategy(
                     df = get_history_func(symbol["ts_code"])
                     indicators = technical_analyzer.calculate_indicators(df)
                     current_price = get_latest_price_func(symbol["ts_code"])
+                    
+                    # 检查价格是否有效
+                    if current_price is None or current_price <= 0:
+                        logger.error(f"[多策略买入] {symbol.get('ts_code', symbol.get('symbol', 'unknown'))}: 无法获取有效价格，当前价格={current_price}，跳过买入")
+                        print(f"[多策略买入] {symbol.get('ts_code', symbol.get('symbol', 'unknown'))}: 无法获取有效价格，当前价格={current_price}，跳过买入")
+                        continue
+                    
+                    logger.info(f"[多策略买入] {symbol.get('ts_code', symbol.get('symbol', 'unknown'))}: 当前价格={current_price:.2f}")
+                    
                     # 计算合理的买入股数（考虑账户资金、价格、风险控制）
                     min_amount = get_min_buy_amount(
                         symbol=symbol["ts_code"],

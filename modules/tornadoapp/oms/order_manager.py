@@ -57,8 +57,17 @@ class OrderManager:
                 logger.error(f"[订单创建] {symbol}: 调整后数量{quantity}不足100股，无法创建订单")
                 return None
         
+        # 验证价格参数
+        if price is None:
+            logger.error(f"[订单创建] {symbol}: 价格参数为 None，无法创建订单")
+            return None
+        if price <= 0:
+            logger.error(f"[订单创建] {symbol}: 价格参数无效: {price}，必须大于0")
+            return None
+        
         risk_pass, risk_msg = self.risk_manager.check_order(symbol, price, quantity, account)
         if not risk_pass:
+            logger.warning(f"[订单创建] {symbol}: 风控检查未通过: {risk_msg}")
             self.audit_logger.log(user, "order_rejected_risk", {
                 "symbol": symbol, "side": side, "price": price, "quantity": quantity, "reason": risk_msg
             })
@@ -66,11 +75,13 @@ class OrderManager:
         order_info = {"symbol": symbol, "side": side, "price": price, "quantity": quantity, "account": account}
         compliance_pass = self.compliance_manager.check(order_info)
         if not compliance_pass:
+            logger.warning(f"[订单创建] {symbol}: 合规检查未通过")
             self.audit_logger.log(user, "order_rejected_compliance", order_info)
             return None
         self.audit_logger.log(user, "order_create", order_info)
         order_id = self._generate_order_id()
         order = Order(order_id, symbol, side, price, quantity, account=account)
+        logger.info(f"[订单创建] 成功创建订单: 订单ID={order_id}, 股票={symbol}, 方向={side}, 价格={price}, 数量={quantity}")
         with self.lock:
             self.orders[order_id] = order
         self._send_order_to_broker(order)
@@ -86,6 +97,15 @@ class OrderManager:
         else:
             direction = None
         if direction is not None:
+            # 记录订单提交前的详细信息
+            logger.info(f"[订单提交] 准备提交订单: 股票={order.symbol}, 方向={order.side}, "
+                       f"价格={order.price}, 数量={order.quantity}, 账户={account}, 本地订单ID={order.order_id}")
+            
+            # 验证价格参数
+            if order.price is None or order.price <= 0:
+                logger.error(f"[订单提交失败] {order.symbol}: 价格参数无效: {order.price}")
+                return
+            
             broker_order_id = self.xt_trader.order_stock_async(
                 account,
                 order.symbol,
@@ -95,6 +115,10 @@ class OrderManager:
                 order.price,
                 order.order_id
             )
+            
+            # 记录订单提交结果
+            logger.info(f"[订单提交] {order.symbol}: order_stock_async 返回值={broker_order_id} (类型={type(broker_order_id).__name__})")
+            
             if broker_order_id:
                 with self.lock:
                     self.broker_order_map[broker_order_id] = order.order_id
@@ -110,6 +134,14 @@ class OrderManager:
                     with self.lock:
                         self.monitoring_tasks[broker_order_id] = task
                     logger.info(f"[订单监控] 启动卖出订单监控: {broker_order_id} ({order.symbol}), 1分钟后检查")
+            else:
+                # broker_order_id 为 None、-1 或空，说明订单提交失败
+                logger.error(f"[订单提交失败] {order.symbol}: order_stock_async 返回值为 {broker_order_id}，订单未成功提交到券商")
+                logger.error(f"[订单提交失败] 订单参数: 价格={order.price}, 数量={order.quantity}, 账户={account}, 方向={order.side}")
+                # 更新订单状态为失败
+                with self.lock:
+                    if order.order_id in self.orders:
+                        self.orders[order.order_id].status = OrderStatus.FAILED
 
     def update_order_status(self, broker_order_id, broker_status, filled_quantity=0, avg_fill_price=0.0, user="system"):
         with self.lock:
