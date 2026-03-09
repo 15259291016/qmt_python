@@ -27,6 +27,14 @@ from modules.tornadoapp.audit.audit_logger import AuditLogger
 # 全局行情缓存
 latest_price_cache = {}
 
+# 全局历史数据缓存（带过期时间）
+history_data_cache = {}
+CACHE_EXPIRE_SECONDS = 600  # 缓存10分钟过期（从5分钟增加到10分钟，减少API调用）
+
+# 市场趋势缓存（更长的过期时间）
+market_trend_cache = {}
+MARKET_TREND_CACHE_EXPIRE_SECONDS = 1800  # 市场趋势缓存30分钟过期
+
 # 全局调度器实例
 scheduler = BackgroundScheduler()
 
@@ -56,9 +64,62 @@ def get_history_func(symbol, tushare_token=None):
     自动识别股票和指数，使用相应的API：
     - 股票：使用 daily API
     - 指数：使用 index_daily API
+    
+    优化策略：
+    1. 只在交易时段（9:30-11:30, 13:00-15:00）调用Tushare API
+    2. 缓存10分钟（从5分钟增加），减少重复查询
+    3. 市场指数使用30分钟长缓存（趋势变化慢）
+    4. 避免超出20000次/天的API限制
     """
     import logging
+    from datetime import datetime, time, timedelta
     logger = logging.getLogger(__name__)
+    
+    # 判断是否为市场指数（趋势指标，可以用更长的缓存）
+    # 注意：这里的指数列表必须与 auto_trader.py 中 judge_market_trend_comprehensive 函数使用的指数列表一致
+    # 确保所有用于市场趋势判断的指数都使用长缓存（30分钟），避免频繁调用API
+    market_indices = ['000001.SH', '399001.SZ', '399006.SZ', '000905.SH']  # 上证、深证、创业板、中证500
+    is_market_index = symbol in market_indices
+    
+    # 1. 检查缓存（市场指数使用长缓存）
+    if is_market_index:
+        cache_key = f"market_{symbol}_{tushare_token}"
+        cache_dict = market_trend_cache
+        cache_expire = MARKET_TREND_CACHE_EXPIRE_SECONDS
+    else:
+        cache_key = f"{symbol}_{tushare_token}"
+        cache_dict = history_data_cache
+        cache_expire = CACHE_EXPIRE_SECONDS
+    
+    if cache_key in cache_dict:
+        cached_data, cache_time = cache_dict[cache_key]
+        # 检查缓存是否过期
+        if (datetime.now() - cache_time).total_seconds() < cache_expire:
+            logger.debug(f"[缓存命中] 使用缓存数据: {symbol}，缓存时间: {cache_time.strftime('%H:%M:%S')}，类型: {'市场指数' if is_market_index else '股票'}")
+            return cached_data
+        else:
+            logger.debug(f"[缓存过期] 缓存已过期: {symbol}，过期时间: {(datetime.now() - cache_time).total_seconds():.0f}秒")
+    
+    # 2. 检查是否在交易时段（9:30-11:30, 13:00-15:00）
+    current_time = datetime.now().time()
+    trading_periods = [
+        (time(9, 30), time(11, 30)),   # 上午交易时段
+        (time(13, 0), time(15, 0))     # 下午交易时段
+    ]
+    
+    is_in_trading_period = any(
+        period_start <= current_time <= period_end 
+        for period_start, period_end in trading_periods
+    )
+    
+    if not is_in_trading_period:
+        logger.debug(f"[API限流] 当前时间{current_time.strftime('%H:%M:%S')}不在交易时段，跳过Tushare API调用: {symbol}")
+        # 如果有过期缓存，返回过期缓存（降级方案）
+        if cache_key in cache_dict:
+            cached_data, cache_time = cache_dict[cache_key]
+            logger.info(f"[降级方案] 使用过期缓存数据: {symbol}，缓存时间: {cache_time.strftime('%H:%M:%S')}")
+            return cached_data
+        return None
     
     if tushare_token is None:
         logger.error(f"获取{symbol}历史行情失败: tushare_token未设置")
@@ -77,11 +138,10 @@ def get_history_func(symbol, tushare_token=None):
     
     try:
         # 计算合理的日期范围（至少获取250个交易日，约1年）
-        from datetime import datetime, timedelta
         end_date = datetime.now().strftime('%Y%m%d')
         start_date = (datetime.now() - timedelta(days=400)).strftime('%Y%m%d')  # 多取一些确保有足够数据
         
-        logger.debug(f"尝试获取{symbol}历史行情 ({'指数' if is_index else '股票'}): {start_date} 至 {end_date}")
+        logger.debug(f"[API调用] 获取{symbol}历史行情 ({'指数' if is_index else '股票'}): {start_date} 至 {end_date}")
         
         # 根据类型选择API
         if is_index:
@@ -119,10 +179,18 @@ def get_history_func(symbol, tushare_token=None):
             # Tushare可能返回vol而不是volume
             df['volume'] = df['vol'].astype(float)
         
-        logger.debug(f"成功获取{symbol}历史行情: {len(df)}条记录，日期范围: {df['trade_date'].min()} 至 {df['trade_date'].max()}")
+        # 3. 缓存数据（根据类型选择缓存字典）
+        cache_dict[cache_key] = (df, datetime.now())
+        logger.debug(f"[缓存更新] 成功获取并缓存{symbol}历史行情: {len(df)}条记录，日期范围: {df['trade_date'].min()} 至 {df['trade_date'].max()}，缓存时长: {cache_expire}秒")
+        
         return df
     except Exception as e:
         logger.error(f"获取{symbol}历史行情失败: {e}", exc_info=True)
+        # 如果API调用失败，尝试返回过期缓存（降级方案）
+        if cache_key in cache_dict:
+            cached_data, cache_time = cache_dict[cache_key]
+            logger.warning(f"[降级方案] API调用失败，使用过期缓存数据: {symbol}，缓存时间: {cache_time.strftime('%H:%M:%S')}")
+            return cached_data
         return None
 
 def get_latest_price_func(symbol, xt_trader=None):
@@ -184,7 +252,8 @@ async def get_config(environment: str = 'SIMULATION'):
             logger.error(f"切换到 {environment} 环境失败")
             raise Exception(f"环境切换失败: {environment}")
         path = env_manager.get_qmt_path()
-        account = env_manager.get_account()
+        # account = env_manager.get_account()
+        account = "8881667160"
         logger.info(f"使用 {environment} 环境: QMT路径={path}, 账户={account}")
         return path, account
     except Exception as e:
@@ -290,7 +359,8 @@ async def run_trader_system(path, account, environment='SIMULATION'):
                 lambda symbol: get_history_func(symbol, tushare_token),
                 lambda symbol: get_latest_price_func(symbol, xt_trader),
                 create_and_record_order,  # 直接传递async下单函数
-                interval=60
+                interval=60,  # 保持60秒间隔，不影响交易响应速度
+                max_stocks=None  # 由DynamicPositionManager根据资金体量自动计算
             )
         )
         # await run_tornado_server()
@@ -307,7 +377,8 @@ async def trader_thread_func(path, account, environment):
 async def main_async():
     """主函数：启动多策略量化交易平台"""
     # 默认使用模拟环境
-    environment = 'SIMULATION'
+    # environment = 'SIMULATION'
+    environment = 'PRODUCTION'
     logger.info(f"程序启动中... 环境: {environment}")
     global stock_selector, position_analyzer, technical_analyzer, order_manager, order_callback_handler, callback, tushare_token, xt_trader, account
     # --- 启动全局调度器（只启动一次） ---

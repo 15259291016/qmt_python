@@ -24,7 +24,8 @@ class CustomMotorClient(MotorClient):
         mongo_password = os.getenv("MONGO_PASSWORD", "123456")
         
         # 构建MongoDB连接URL
-        db_url = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}"
+        # 添加 serverSelectionTimeoutMS=5000 (5秒超时) 避免连接失败时长时间卡顿
+        db_url = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}?serverSelectionTimeoutMS=5000"
         
         super().__init__(
             db_url, 
