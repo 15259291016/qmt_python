@@ -481,7 +481,7 @@ print(f"数据导出到: {csv_file}")
 扫描下方二维码添加微信好友，交流量化交易经验：
 
 <div align="center">
-  <img src="docs/images/wechat_qrcode.png" alt="微信二维码" width="300"/>
+  <img src="docs/images/wechat_qrcode.jpg" alt="微信二维码" width="300"/>
   <p>扫一扫上面的二维码图案，加我为朋友。</p>
 </div>
 
@@ -493,7 +493,7 @@ print(f"数据导出到: {csv_file}")
 扫描下方二维码加入微信群，与更多量化交易爱好者交流：
 
 <div align="center">
-  <img src="docs/images/wechat_group_qrcode.png" alt="微信群二维码" width="300"/>
+  <img src="docs/images/wechat_group_qrcode.jpg" alt="微信群二维码" width="300"/>
   <p><strong>群聊：量化投资交流群</strong></p>
   <p>⚠️ 该二维码7天内（3月16日前）有效，重新进入将更新</p>
 </div>
