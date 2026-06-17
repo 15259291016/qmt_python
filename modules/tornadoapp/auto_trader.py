@@ -11,6 +11,15 @@ from modules.tornadoapp.risk.risk_manager import RiskManager
 from modules.tornadoapp.compliance.compliance_manager import ComplianceManager
 from modules.tornadoapp.audit.audit_logger import AuditLogger
 from .wencai_info import async_select_stocks_by_wencai
+from modules.market_timing.config import MARKET_BREADTH_CONFIG, STOCK_RANKING_CONFIG, MARKET_TIMING_CONFIG
+
+try:
+    # 统一的交易事件记录（写入 Excel），用于事后复盘
+    from .trade_event_recorder import record_trade_event
+except Exception:
+    # 如果导入失败（例如未安装依赖），提供一个空实现，不影响主流程
+    def record_trade_event(*args, **kwargs):  # type: ignore[no-redef]
+        return None
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -21,6 +30,79 @@ logger = logging.getLogger(__name__)
 
 # 全局行情缓存
 latest_price_cache = {}
+
+# 全局：追踪止盈（持仓后的最高价/最高盈利）
+# 说明：用于“等到冲高后回撤再卖”的移动止盈逻辑（不等于固定止盈线）。
+# key: symbol, value: {"peak_price": float, "peak_pnl_pct": float, "updated_at": datetime}
+position_peak_cache: Dict[str, Dict[str, Any]] = {}
+
+# 全局：股票池缓存（跨轮询复用，避免极端行情下反复买入）
+_stock_pool_cache: Dict[str, Any] = {
+    'date': '',
+    'stocks': [],
+    'pending_stocks': [],
+    'frozen_until': None,
+    'freeze_reason': '',
+}
+
+# 全局：市场广度触发统计（按交易日）
+_breadth_report_cache: Dict[str, Any] = {
+    'date': '',
+    'trigger_count': 0,
+    'trigger_times': [],
+    'last_trigger_key': '',
+    'first_trigger_time': None,
+    'baseline_asset': None,
+    'max_asset_after_trigger': None,
+    'min_asset_after_trigger': None,
+    'last_asset': None,
+    'last_report_time': None,
+}
+
+
+def _is_extreme_market(get_history_func, index_code: str = '000001.SH') -> Dict[str, Any]:
+    """
+    检测当日市场是否处于极端波动状态。
+    满足任一条件即为极端行情：
+    A. 当日振幅 > 3%
+    B. 当日涨跌幅绝对值 > 2%
+    C. 当前价距当日最高价回撤 > 1.5%
+    """
+    try:
+        from xtquant import xtdata
+        tick_info = xtdata.get_full_tick([index_code])
+        tick = tick_info.get(index_code) if tick_info else None
+        if tick is None:
+            return {'is_extreme': False, 'reason': '无法获取指数tick数据', 'amplitude_pct': 0, 'change_pct': 0, 'drawdown_from_high': 0}
+
+        last_price  = float(tick.get('lastPrice', 0) or 0)
+        high_price  = float(tick.get('high', 0) or 0)
+        low_price   = float(tick.get('low', 0) or 0)
+        prev_close  = float(tick.get('lastClose', 0) or 0)
+
+        if prev_close <= 0 or last_price <= 0:
+            return {'is_extreme': False, 'reason': '指数价格数据异常', 'amplitude_pct': 0, 'change_pct': 0, 'drawdown_from_high': 0}
+
+        amplitude_pct = (high_price - low_price) / prev_close * 100 if high_price > low_price else 0.0
+        change_pct = (last_price - prev_close) / prev_close * 100
+        drawdown_from_high = (last_price - high_price) / high_price * 100 if high_price > 0 else 0.0
+
+        if amplitude_pct > 3.0:
+            return {'is_extreme': True, 'reason': f'当日振幅过大（{amplitude_pct:.2f}% > 3.0%），市场剧烈震荡，暂缓买入',
+                    'amplitude_pct': amplitude_pct, 'change_pct': change_pct, 'drawdown_from_high': drawdown_from_high}
+        if abs(change_pct) > 2.0:
+            direction = '快速拉升' if change_pct > 0 else '快速下跌'
+            return {'is_extreme': True, 'reason': f'指数{direction}（涨跌幅{change_pct:.2f}%，绝对值 > 2.0%），暂缓买入',
+                    'amplitude_pct': amplitude_pct, 'change_pct': change_pct, 'drawdown_from_high': drawdown_from_high}
+        if drawdown_from_high < -1.5:
+            return {'is_extreme': True, 'reason': f'指数冲高回落（距当日最高价回撤{drawdown_from_high:.2f}% < -1.5%），暂缓买入',
+                    'amplitude_pct': amplitude_pct, 'change_pct': change_pct, 'drawdown_from_high': drawdown_from_high}
+
+        return {'is_extreme': False, 'reason': '', 'amplitude_pct': amplitude_pct, 'change_pct': change_pct, 'drawdown_from_high': drawdown_from_high}
+    except Exception as e:
+        logger.warning(f'[极端行情检测] 检测失败: {e}，默认不冻结')
+        return {'is_extreme': False, 'reason': str(e), 'amplitude_pct': 0, 'change_pct': 0, 'drawdown_from_high': 0}
+
 
 class TechnicalAnalyzer:
     """技术指标分析器（示例，可扩展）"""
@@ -259,11 +341,53 @@ def _calculate_multi_period_returns(df) -> Dict[str, float]:
     return returns
 
 
+
+def _rank_candidate_stocks(selected: List[Dict[str, Any]], get_history_func, market_trend: Optional[Dict[str, Any]] = None, top_n: Optional[int] = None) -> List[Dict[str, Any]]:
+    """对问财候选进行二次打分并返回Top-N"""
+    if top_n is None:
+        top_n = int(STOCK_RANKING_CONFIG.get('top_n', 3))
+
+    scored = []
+    for stock in selected:
+        ts_code = stock.get('ts_code')
+        if not ts_code:
+            continue
+        score_info = _score_candidate_stock(ts_code, get_history_func, market_trend=market_trend)
+        merged = {**stock, **score_info}
+        scored.append(merged)
+
+    scored.sort(key=lambda x: x.get('total_score', 0.0), reverse=True)
+
+    # 过滤最低标准，避免弱票进入
+    min_total_score = float(STOCK_RANKING_CONFIG.get('min_total_score', 70.0))
+    min_trend_score = float(STOCK_RANKING_CONFIG.get('min_trend_score', 60.0))
+    min_volume_score = float(STOCK_RANKING_CONFIG.get('min_volume_score', 50.0))
+
+    filtered = [
+        s for s in scored
+        if s.get('total_score', 0.0) >= min_total_score
+        and s.get('trend_score', 0.0) >= min_trend_score
+        and s.get('volume_score', 0.0) >= min_volume_score
+    ]
+    final_list = filtered[:top_n] if filtered else scored[:top_n]
+
+    if scored:
+        logger.info("[候选排序] 二次评分明细（Top10）: " + " | ".join([
+            f"{s.get('name', s.get('symbol', 'N/A'))}({s.get('ts_code', s.get('symbol', 'N/A'))})="
+            f"{s.get('total_score', 0):.1f}[趋{s.get('trend_score', 0):.0f}/量{s.get('volume_score', 0):.0f}/"
+            f"强{s.get('rs_score', 0):.0f}/回{s.get('risk_score', 0):.0f}/流{s.get('liquidity_score', 0):.0f}]"
+            for s in scored[:10]
+        ]))
+
+    return final_list
+
+
 def judge_market_trend_comprehensive(
     get_history_func,
     position_analyzer: PositionAnalyzer,
     fear_greed_index: float,
     long_term_fear_greed_index: float,
+    market_breadth: Optional[Dict[str, Any]] = None,
     index_codes: Optional[List[str]] = None  # 多指数列表
 ) -> Dict[str, Any]:
     """
@@ -282,6 +406,7 @@ def judge_market_trend_comprehensive(
     2. 恐贪指数（权重30%）
     3. 多周期涨跌幅（权重20%）
     4. 成交量+价格方向（权重15%）
+    5. 市场广度（上涨家数占比，权重20%，用于修正结构性行情）
     
     Args:
         get_history_func: 获取历史数据的函数
@@ -556,6 +681,37 @@ def judge_market_trend_comprehensive(
         else:
             factors['volume'] = {'score': 0.0, 'error': '数据不足'}
             logger.warning(f"[市场趋势] 成交量: 数据不足，无法计算成交量指标")
+
+        # ========== 5. 市场广度（权重20%） ==========
+        breadth_score = 0.0
+        if market_breadth is not None:
+            up_ratio = float(market_breadth.get('up_ratio', 0.5) or 0.5)
+            limit_spread_ratio = float(market_breadth.get('limit_spread_ratio', 0.0) or 0.0)
+            breadth_weight = float(MARKET_BREADTH_CONFIG.get('breadth_weight', 0.20))
+
+            # 上涨占比映射到[-1,1]，并叠加涨停跌停差修正
+            up_ratio_component = max(-1.0, min(1.0, (up_ratio - 0.5) / 0.25))
+            breadth_score = 0.8 * up_ratio_component + 0.2 * limit_spread_ratio
+            breadth_score = max(-1.0, min(1.0, breadth_score))
+
+            factors['market_breadth'] = {
+                'score': breadth_score,
+                'up_ratio': up_ratio,
+                'up_count': int(market_breadth.get('up_count', 0) or 0),
+                'down_count': int(market_breadth.get('down_count', 0) or 0),
+                'total_count': int(market_breadth.get('total_count', 0) or 0),
+                'limit_spread_ratio': limit_spread_ratio,
+                'signal': 'broad_bull' if up_ratio >= 0.70 else 'broad_bear' if up_ratio <= 0.35 else 'mixed'
+            }
+            scores.append(breadth_score * breadth_weight)
+            logger.info(
+                f"[市场趋势] 市场广度得分: {breadth_score:.3f} (权重{breadth_weight:.2f}), "
+                f"上涨占比={up_ratio:.2%}, 上涨家数={market_breadth.get('up_count', 0)}, "
+                f"下跌家数={market_breadth.get('down_count', 0)}"
+            )
+        else:
+            factors['market_breadth'] = {'score': 0.0, 'error': '广度数据不可用'}
+            logger.warning("[市场趋势] 市场广度: 数据不可用，跳过广度修正")
         
         # ========== 综合得分 ==========
         # 如果所有因子都失败，至少使用恐贪指数作为降级方案
@@ -631,6 +787,16 @@ def judge_market_trend_comprehensive(
             trend = 'bear'  # 熊市
         else:
             trend = 'neutral'  # 震荡市
+
+        # 置信度过低时降级为 neutral：
+        # 置信度 < 0.35 说明各因子数据不足或分歧较大，
+        # 此时不应该用低置信度的 bear 判断来禁止买入，应保守地视为震荡市。
+        if confidence < 0.35 and trend == 'bear':
+            logger.warning(
+                f"[市场趋势] 置信度过低({confidence:.2f} < 0.35)，bear 判断不可靠，"
+                f"降级为 neutral（得分={total_score:.3f}），避免错误禁止买入"
+            )
+            trend = 'neutral'
         
         # 生成描述信息（根据数据质量调整）
         base_descriptions = {
@@ -679,7 +845,10 @@ async def monitor_positions_and_trade_multi_strategy(
     order_manager,
     interval: int = 60,
     max_stocks: int = None,  # 改为None，由DynamicPositionManager自动计算
-    enable_market_timing: bool = True  # 是否启用市场择时（默认启用）
+    enable_market_timing: bool = True,  # 是否启用市场择时（默认启用）
+    get_optimized_buy_price_func=None,  # 可选：优化挂单价函数，None时直接用最新价
+    environment: str = 'SIMULATION',  # 运行环境：SIMULATION=模拟盘，PRODUCTION=实盘
+    order_manager_instance=None,  # OrderManager实例，用于极端行情撤单等操作
 ):
     """
     多策略持仓监控+自动买卖任务（支持市场择时）。
@@ -708,6 +877,9 @@ async def monitor_positions_and_trade_multi_strategy(
     # 修复：MarketTimingEngine 类不存在，暂时禁用市场择时功能
     # from modules.market_timing import MarketTimingEngine
     
+    # 声明使用全局缓存（跨轮询复用）
+    global _stock_pool_cache, _breadth_report_cache
+
     # 初始化策略管理器
     risk_manager = RiskManager()
     compliance_manager = ComplianceManager()
@@ -730,7 +902,7 @@ async def monitor_positions_and_trade_multi_strategy(
         logger.warning("[市场择时] MarketTimingEngine 类不存在，已自动禁用市场择时功能，使用固定时间买入")
         enable_market_timing = False  # 强制禁用
     
-    logger.info("[市场择时] 市场择时引擎已禁用，使用固定时间买入")
+        logger.info("[市场择时] 市场择时引擎已禁用，使用固定时间买入")
     
     # 添加账户
     strategy_manager.add_account("main_account", account)
@@ -913,11 +1085,13 @@ async def monitor_positions_and_trade_multi_strategy(
             print(f"[恐贪指数] 当日: {fear_greed_index:.1f}，长期: {long_term_fear_greed_index:.1f}")
             
             # 综合判断市场趋势（牛市/熊市/震荡市）- 使用多指数综合判断
+            market_breadth = position_analyzer.get_market_breadth_snapshot()
             market_trend = judge_market_trend_comprehensive(
                 get_history_func=get_history_func,
                 position_analyzer=position_analyzer,
                 fear_greed_index=fear_greed_index,
                 long_term_fear_greed_index=long_term_fear_greed_index,
+                market_breadth=market_breadth,
                 index_codes=['000001.SH', '399001.SZ', '399006.SZ', '000905.SH']  # 上证、深证、创业板、中证500
             )
             
@@ -978,71 +1152,347 @@ async def monitor_positions_and_trade_multi_strategy(
             
             # 选股池自动买入（固定时间段精准买入）
             current_time = datetime.now().time()
-            # 定义选股时间段列表（精准时间段，避开极端波动期）
+
+            # 模拟盘与实盘使用相同的精准买入时间段
+            is_simulation = (environment == 'SIMULATION')
             stock_selection_periods = [
-                (time(9, 50), time(10, 5)),    # 上午：9:50-10:05（15分钟，开盘后观察期）
+                (time(9, 50), time(10, 15)),    # 上午：9:50-10:05（15分钟，开盘后观察期）
                 (time(13, 40), time(13, 50)),  # 下午：13:40-13:50（10分钟，下午中段）
                 (time(14, 20), time(14, 30))   # 尾盘：14:20-14:30（10分钟，尾盘前调仓）
             ]
-            # 总计35分钟，占交易时间的15%（精准择时）
-            # 检查当前时间是否在任一选股时间段内
+            logger.debug(f"[买入时间] {'模拟盘' if is_simulation else '实盘'}模式，使用精准时间段买入")
+
+            # 市场不好（熊市）且置信度较高时，过滤掉上午时间段，只保留下午时间段
+            # 逻辑：只有明确的熊市信号（置信度>=0.35）才禁止上午买入，避免误判错过反弹
+            # 震荡市（neutral）不限制上午买入，因为方向不明时更应该把握反弹机会
+            market_confidence = market_trend.get('confidence', 0.0)
+            breadth_info = market_trend.get('factors', {}).get('market_breadth', {})
+            breadth_up_ratio = float(breadth_info.get('up_ratio', 0.0) or 0.0)
+            morning_buy_override_up_ratio = float(MARKET_BREADTH_CONFIG.get('morning_buy_override_up_ratio', 0.70))
+            breadth_override = (
+                isinstance(breadth_info, dict)
+                and 'error' not in breadth_info
+                and breadth_up_ratio >= morning_buy_override_up_ratio
+            )
+
+            market_is_bad = (
+                market_trend.get('trend') == 'bear'
+                and market_confidence >= 0.35
+                and not breadth_override
+            )
+            if market_is_bad:
+                active_periods = [
+                    p for p in stock_selection_periods
+                    if p[0] >= time(13, 0)  # 只保留下午时间段
+                ]
+                if current_time < time(13, 0):
+                    logger.info(
+                        f"[市场择时] 明确熊市（得分={market_trend.get('score', 0):.2f}，置信度={market_confidence:.2f}），"
+                        f"上午不买股票，等待下午13:40后再评估"
+                    )
+                    print(f"[市场择时] 明确熊市（置信度={market_confidence:.2f}），上午跳过买入，下午13:40后再评估")
+            else:
+                active_periods = stock_selection_periods
+                if breadth_override and market_trend.get('trend') == 'bear':
+                    logger.info(
+                        f"[市场择时] 熊市信号但广度强（上涨占比={breadth_up_ratio:.2%}>="
+                        f"{morning_buy_override_up_ratio:.0%}），放开上午买入窗口"
+                    )
+                    print(
+                        f"[市场择时] 熊市但市场广度强（上涨占比={breadth_up_ratio:.2%}，"
+                        f"阈值={morning_buy_override_up_ratio:.0%}），上午允许试仓"
+                    )
+
+                    # 记录“广度覆盖触发”统计（按分钟去重，防止60秒轮询重复计数）
+                    trigger_key = datetime.now().strftime('%H:%M')
+                    if _breadth_report_cache.get('last_trigger_key') != trigger_key:
+                        _breadth_report_cache['last_trigger_key'] = trigger_key
+                        _breadth_report_cache['trigger_count'] += 1
+                        _breadth_report_cache['trigger_times'].append(datetime.now().strftime('%H:%M:%S'))
+                        if _breadth_report_cache['first_trigger_time'] is None:
+                            _breadth_report_cache['first_trigger_time'] = datetime.now().strftime('%H:%M:%S')
+
+                        # 触发时记录资产基线（用于计算触发后收益和回撤）
+                        try:
+                            asset_snapshot = xt_trader.query_stock_asset(account)
+                            baseline_asset = float(
+                                getattr(asset_snapshot, 'total_asset', 0) or
+                                getattr(asset_snapshot, 'totalAsset', 0) or
+                                (getattr(asset_snapshot, 'cash', 0) or 0)
+                            )
+                            if baseline_asset > 0 and _breadth_report_cache['baseline_asset'] is None:
+                                _breadth_report_cache['baseline_asset'] = baseline_asset
+                                _breadth_report_cache['max_asset_after_trigger'] = baseline_asset
+                                _breadth_report_cache['min_asset_after_trigger'] = baseline_asset
+                                _breadth_report_cache['last_asset'] = baseline_asset
+                                logger.info(
+                                    f"[市场广度报告] 首次触发基线资产={baseline_asset:.2f}元，"
+                                    f"触发时间={_breadth_report_cache['first_trigger_time']}"
+                                )
+                        except Exception as _asset_err:
+                            logger.warning(f"[市场广度报告] 获取触发基线资产失败: {_asset_err}")
+                elif market_trend.get('trend') == 'neutral':
+                    logger.info(
+                        f"[市场择时] 震荡市/低置信度（得分={market_trend.get('score', 0):.2f}，置信度={market_confidence:.2f}），"
+                        f"不限制上午买入，正常执行选股"
+                    )
+
+            # 检查当前时间是否在有效时间段内
             is_stock_selection_time = any(
-                period_start <= current_time <= period_end 
-                for period_start, period_end in stock_selection_periods
+                period_start <= current_time <= period_end
+                for period_start, period_end in active_periods
             )
             
-            # ========== 买入时间判断（不依赖上证指数） ==========
-            # 简化逻辑：只要在选股时间段内就执行买入，不需要市场择时判断
-            should_execute_buy = is_stock_selection_time
-            
-            if should_execute_buy:
-                logger.info(f"[固定时间买入] 当前时间{current_time.strftime('%H:%M:%S')}在买入时间段内，准备执行选股买入")
+            # ========== 买入时间判断 + 极端行情检测 ==========
+            today_str = datetime.now().strftime('%Y-%m-%d')
+
+            # 实时更新“广度覆盖触发”后的资产轨迹（用于收益/回撤统计）
+            if _breadth_report_cache.get('baseline_asset') is not None:
+                try:
+                    asset_snapshot = xt_trader.query_stock_asset(account)
+                    current_total_asset = float(
+                        getattr(asset_snapshot, 'total_asset', 0) or
+                        getattr(asset_snapshot, 'totalAsset', 0) or
+                        (getattr(asset_snapshot, 'cash', 0) or 0)
+                    )
+                    if current_total_asset > 0:
+                        _breadth_report_cache['last_asset'] = current_total_asset
+                        prev_max = _breadth_report_cache.get('max_asset_after_trigger')
+                        prev_min = _breadth_report_cache.get('min_asset_after_trigger')
+                        _breadth_report_cache['max_asset_after_trigger'] = max(prev_max, current_total_asset) if prev_max is not None else current_total_asset
+                        _breadth_report_cache['min_asset_after_trigger'] = min(prev_min, current_total_asset) if prev_min is not None else current_total_asset
+                except Exception as _asset_track_err:
+                    logger.debug(f"[市场广度报告] 更新资产轨迹失败: {_asset_track_err}")
+
+            # 每日重置缓存
+            if _stock_pool_cache['date'] != today_str:
+                _stock_pool_cache['date'] = today_str
+                _stock_pool_cache['stocks'] = []
+                _stock_pool_cache['pending_stocks'] = []
+                _stock_pool_cache['frozen_until'] = None
+                _stock_pool_cache['freeze_reason'] = ''
+                logger.info(f'[股票池缓存] 新的交易日({today_str})，已重置股票池缓存')
+
+            # 每日重置“市场广度触发报告”缓存
+            if _breadth_report_cache['date'] != today_str:
+                _breadth_report_cache['date'] = today_str
+                _breadth_report_cache['trigger_count'] = 0
+                _breadth_report_cache['trigger_times'] = []
+                _breadth_report_cache['last_trigger_key'] = ''
+                _breadth_report_cache['first_trigger_time'] = None
+                _breadth_report_cache['baseline_asset'] = None
+                _breadth_report_cache['max_asset_after_trigger'] = None
+                _breadth_report_cache['min_asset_after_trigger'] = None
+                _breadth_report_cache['last_asset'] = None
+                _breadth_report_cache['last_report_time'] = None
+                logger.info(f'[市场广度报告] 新的交易日({today_str})，已重置广度触发统计')
+
+            # 检测极端行情（每次循环都检测，实时感知市场状态）
+            extreme_info = _is_extreme_market(get_history_func)
+            now_dt = datetime.now()
+
+            if extreme_info['is_extreme']:
+                # 仅在当前未处于冻结期时才设置新的冻结时间，避免冻结时间被反复刷新延长
+                already_frozen = (
+                    _stock_pool_cache['frozen_until'] is not None
+                    and now_dt < _stock_pool_cache['frozen_until']
+                )
+                if not already_frozen:
+                    from datetime import timedelta
+                    freeze_end = now_dt + timedelta(minutes=15)
+                    _stock_pool_cache['frozen_until'] = freeze_end
+                    _stock_pool_cache['freeze_reason'] = extreme_info['reason']
+                    logger.warning(
+                        f"[极端行情] 检测到极端行情，暂停买入15分钟（至{freeze_end.strftime('%H:%M:%S')}）。"
+                        f"原因: {extreme_info['reason']} "
+                        f"| 振幅={extreme_info['amplitude_pct']:.2f}% "
+                        f"| 涨跌幅={extreme_info['change_pct']:.2f}% "
+                        f"| 距高点回撤={extreme_info['drawdown_from_high']:.2f}%"
+                    )
+                    print(
+                        f"[极端行情] {extreme_info['reason']}\n"
+                        f"  振幅={extreme_info['amplitude_pct']:.2f}%  "
+                        f"涨跌幅={extreme_info['change_pct']:.2f}%  "
+                        f"距高点回撤={extreme_info['drawdown_from_high']:.2f}%\n"
+                        f"  已选股票进入待买队列，冻结至 {freeze_end.strftime('%H:%M:%S')} 后重新评估"
+                    )
+                    # 撤销所有未成交的买入订单
+                    if order_manager_instance is not None:
+                        try:
+                            cancelled = order_manager_instance.cancel_all_open_buy_orders(user="extreme_market")
+                            if cancelled > 0:
+                                logger.warning(f"[极端行情撤单] 已撤销{cancelled}笔未成交买入订单")
+                                print(f"[极端行情撤单] 已撤销{cancelled}笔未成交买入订单")
+                            else:
+                                logger.info("[极端行情撤单] 当前无未成交买入订单需要撤销")
+                        except Exception as _cancel_err:
+                            logger.error(f"[极端行情撤单] 撤单失败: {_cancel_err}", exc_info=True)
+                    else:
+                        logger.warning("[极端行情撤单] order_manager_instance未传入，跳过撤单")
+
+            # 判断当前是否处于冻结期
+            is_frozen = (
+                _stock_pool_cache['frozen_until'] is not None
+                and now_dt < _stock_pool_cache['frozen_until']
+            )
+            if is_frozen:
+                remaining = int((_stock_pool_cache['frozen_until'] - now_dt).total_seconds() / 60)
+                logger.info(
+                    f"[极端行情] 仍在冻结期，距解冻还有约{remaining}分钟。"
+                    f"原因: {_stock_pool_cache['freeze_reason']}"
+                )
+                print(f"[极端行情] 买入已冻结，距解冻还有约{remaining}分钟")
+            else:
+                if _stock_pool_cache['frozen_until'] is not None:
+                    logger.info(f'[极端行情] 冻结期结束，恢复买入评估')
+                    _stock_pool_cache['frozen_until'] = None
+                    _stock_pool_cache['freeze_reason'] = ''
+
+            # 先计算当前仓位容量：无可用仓位时，不查询问财（限流）
+            held = {p.stock_code for p in valid_positions}
+            current_stock_count = len(held)
+            position_params = position_manager.get_position_params(fear_greed_index)
+            adjusted_max_stocks = position_params['max_stocks']
+
+            # 买入容量检查：持股数量 + 现金双重限制
+            has_slot_capacity = current_stock_count < adjusted_max_stocks
+            min_position_value = float(position_params.get('min_position_value', 10000.0))
+            available_cash_for_buy = 0.0
+            try:
+                asset_snapshot = xt_trader.query_stock_asset(account)
+                available_cash_for_buy = float(
+                    getattr(asset_snapshot, 'cash', 0)
+                    or getattr(asset_snapshot, 'available_cash', 0)
+                    or 0
+                )
+            except Exception as _asset_err:
+                logger.warning(f"[资金管理] 获取可用资金失败，保守处理为无买入容量: {_asset_err}")
+            has_cash_capacity = available_cash_for_buy >= min_position_value
+
+            has_buy_capacity = has_slot_capacity and has_cash_capacity
+            should_execute_buy = is_stock_selection_time and not is_frozen
+
+            if should_execute_buy and has_buy_capacity:
+                logger.info(
+                    f"[固定时间买入] 当前时间{current_time.strftime('%H:%M:%S')}在买入时间段内且无冻结，"
+                    f"有买入容量（持股{current_stock_count}/{adjusted_max_stocks}，可用资金={available_cash_for_buy:.2f}）"
+                )
+            elif should_execute_buy and not has_slot_capacity:
+                logger.info(
+                    f"[固定时间买入] 当前持股已满({current_stock_count}/{adjusted_max_stocks})，"
+                    f"跳过问财查询以减少请求频率"
+                )
+            elif should_execute_buy and has_slot_capacity and not has_cash_capacity:
+                logger.info(
+                    f"[固定时间买入] 可用资金不足（可用={available_cash_for_buy:.2f} < 最小建仓={min_position_value:.2f}），"
+                    f"跳过问财查询以减少无效请求"
+                )
+            elif is_frozen:
+                logger.info(f"[固定时间买入] 当前时间{current_time.strftime('%H:%M:%S')}在买入时间段内，但处于极端行情冻结期，跳过选股")
             else:
                 logger.debug(f"[固定时间买入] 当前时间{current_time.strftime('%H:%M:%S')}不在买入时间段内，跳过选股")
-            
+
             # ========== 执行选股和买入 ==========
             selected = []  # 默认不选股
-            if should_execute_buy and is_stock_selection_time:
+            if should_execute_buy and is_stock_selection_time and has_buy_capacity:
                 # 确定当前在哪个时间段
                 current_period = None
                 for period_start, period_end in stock_selection_periods:
                     if period_start <= current_time <= period_end:
                         current_period = f"{period_start.strftime('%H:%M')}-{period_end.strftime('%H:%M')}"
                         break
-                
+
                 try:
+                    # 每次都调用问财查询最新股票
+                    # 但将结果合并到缓存股票池中（去重），避免遗漏之前选出但未买入的票
                     logger.info(f"[选股] 当前时间{current_time.strftime('%H:%M:%S')}在选股时间段内({current_period})，执行问财选股")
-                    # selected_codes = stock_selector.select_by_hot_industry()
-                    # print(f"热点行业选股结果: {selected_codes}")
                     question_list = []
-                    # question_list.append("突破十日均线，散户数量下降")
-                    question_list.append("突破十日均线，散户数量下降，龙头股，剔除st")
-                    
-                    # 使用异步函数获取股票列表（包含详细信息）
-                    # 修复：async_select_stocks_by_wencai 返回的是字典列表，不需要再包装
-                    selected = await async_select_stocks_by_wencai(
+                    question_list.append("最近热点题材，突破十日均线，散户数量小于-100，剔除st，剔除退市警告股")
+
+                    fresh_selected = await async_select_stocks_by_wencai(
                         question_list=question_list,
                         filter_by_retail_investor=True,
                         include_info=True
                     )
-                    # selected_codes = stock_selector.select_by_wencai("比亚迪")
-                    logger.info(f"[选股] 问财选股完成，共选出{len(selected)}只股票")
+                    logger.info(f"[选股] 问财选股完成，本次新选出{len(fresh_selected)}只股票")
+
+                    # 合并到缓存池（去重）：保留历史未买入的票 + 本次新选的票
+                    cached_stocks = _stock_pool_cache.get('stocks', [])
+                    cached_codes = {s.get('ts_code') for s in cached_stocks}
+                    new_stocks = [s for s in fresh_selected if s.get('ts_code') not in cached_codes]
+                    merged = cached_stocks + new_stocks
+                    _stock_pool_cache['stocks'] = merged
+                    _stock_pool_cache['date'] = today_str
+                    _stock_pool_cache['last_period'] = current_period
+                    selected = merged
+                    if new_stocks:
+                        logger.info(f"[股票池缓存] 新增{len(new_stocks)}只股票，缓存池共{len(merged)}只")
+                    else:
+                        logger.info(f"[股票池缓存] 本次无新增股票，缓存池共{len(merged)}只")
+
+                    # 合并待买队列（上次因极端行情暂缓的股票）
+                    pending = _stock_pool_cache.get('pending_stocks', [])
+                    if pending:
+                        # 去重合并
+                        existing_codes = {s.get('ts_code') for s in selected}
+                        new_pending = [s for s in pending if s.get('ts_code') not in existing_codes]
+                        selected = selected + new_pending
+                        _stock_pool_cache['pending_stocks'] = []
+                        logger.info(f"[股票池缓存] 合并{len(new_pending)}只待买股票，当前候选总数{len(selected)}只")
+                        print(f"[股票池缓存] 合并{len(new_pending)}只因极端行情暂缓的股票，一并尝试买入")
+
+                    # 二次评分排序：候选池 -> Top-N（由配置文件控制）
+                    ranked_selected = _rank_candidate_stocks(selected, get_history_func, market_trend=market_trend)
+                    selected = ranked_selected
+
+                    # 打印选股结果
+                    print(f"\n{'='*60}")
+                    print(f"[问财选股结果] 时间: {current_time.strftime('%H:%M:%S')}, 时间段: {current_period}")
+                    print(f"[问财选股结果] 二次评分后保留{len(selected)}只候选股票")
+                    if selected:
+                        for i, stock in enumerate(selected, 1):
+                            ts_code = stock.get('ts_code', 'N/A')
+                            name = stock.get('name', 'N/A')
+                            total_score = stock.get('total_score', 0.0)
+                            trend_score = stock.get('trend_score', 0.0)
+                            volume_score = stock.get('volume_score', 0.0)
+                            rs_score = stock.get('rs_score', 0.0)
+                            breakout_boost = stock.get('breakout_boost', 0.0)
+                            market_aggressiveness = stock.get('market_aggressiveness', 1.0)
+                            market_trend_label = stock.get('market_trend', 'neutral')
+                            print(
+                                f"  {i}. {name}({ts_code}) 总分={total_score:.1f} "
+                                f"[趋{trend_score:.0f}/量{volume_score:.0f}/强{rs_score:.0f}/启{breakout_boost:.0f}/"
+                                f"市{market_trend_label}:{market_aggressiveness:.2f}]"
+                            )
+                    else:
+                        print(f"[问财选股结果] 未选出任何股票")
+                    print(f"{'='*60}\n")
+
                 except Exception as e:
                     logger.error(f"[选股] 问财选股失败: {e}，本次不选股", exc_info=True)
-                    print(f"[选股] 问财选股失败: {e}，本次不选股")
-                    selected = []  # 选股失败时也不选股
+                    print(f"[问财选股结果] 选股失败: {e}")
+                    selected = []
+            elif is_frozen and is_stock_selection_time:
+                # 处于冻结期但在时间段内：把已选票存入待买队列，等解冻后消化
+                if _stock_pool_cache.get('stocks'):
+                    pending_codes = {s.get('ts_code') for s in _stock_pool_cache.get('pending_stocks', [])}
+                    new_pending = [s for s in _stock_pool_cache['stocks'] if s.get('ts_code') not in pending_codes]
+                    _stock_pool_cache['pending_stocks'].extend(new_pending)
+                    logger.info(f"[股票池缓存] 极端行情冻结中，{len(new_pending)}只股票进入待买队列，等待解冻后消化")
+                    print(f"[股票池缓存] 极端行情冻结中，{len(new_pending)}只股票进入待买队列")
+                selected = []
             else:
-                # 不在买入时间段内
                 logger.debug(f"[固定时间买入] 当前时间{current_time.strftime('%H:%M:%S')}不在买入时间段内，跳过选股")
-            
-            held = {p.stock_code for p in valid_positions}
-            current_stock_count = len(held)
-            
-            # 使用动态持仓管理器获取持仓参数（根据账户资金体量和恐贪指数自动调整）
-            position_params = position_manager.get_position_params(fear_greed_index)
-            adjusted_max_stocks = position_params['max_stocks']
-            
+                selected = []
+
             logger.info(f"[资金管理] 当前持股数量={current_stock_count}只，最大持股数量={adjusted_max_stocks}只")
+            
+            # ========== 打印买入前的状态信息 ==========
+            if selected:
+                print(f"\n[买入检查] 当前持股: {current_stock_count}只, 最大持股: {adjusted_max_stocks}只")
+                print(f"[买入检查] 恐贪指数: 当日={fear_greed_index:.1f}, 长期={long_term_fear_greed_index:.1f}")
+                print(f"[买入检查] 开始检查 {len(selected)} 只候选股票的买入条件...\n")
             
             # 多策略买入逻辑
             for stock in selected:
@@ -1071,9 +1521,25 @@ async def monitor_positions_and_trade_multi_strategy(
                         print(f"[多策略买入] {stock_name}({ts_code}): 无法获取有效价格，当前价格={current_price}，跳过买入")
                         continue
                     
-                    logger.info(f"[多策略买入] {stock_name}({ts_code}): 当前价格={current_price:.2f}")
+                    # 根据分时K线判断是否处于局部高点，避免买在山峰
+                    # 返回 None 表示当前在高点，暂不买入；返回 float 则为优化挂单价
+                    try:
+                        if get_optimized_buy_price_func is not None:
+                            buy_price = get_optimized_buy_price_func(ts_code, current_price, market_trend.get('trend', 'neutral'))
+                        else:
+                            buy_price = current_price
+                    except Exception:
+                        buy_price = current_price
+
+                    # 高点判断：返回 None 时跳过本次买入，等待回调
+                    if buy_price is None:
+                        logger.info(f"[多策略买入] {stock_name}({ts_code}): 当前处于分时高点，跳过买入，等待回调")
+                        continue
+                    
+                    logger.info(f"[多策略买入] {stock_name}({ts_code}): 最新价={current_price:.2f}, 优化挂单价={buy_price:.2f}")
                     
                     # 使用动态持仓管理器计算买入股数（根据账户资金体量自动调整）
+                    # 注意：买入数量以 current_price 计算（反映真实成本），挂单用 buy_price
                     min_amount = position_manager.calculate_buy_amount(
                         symbol=ts_code,
                         current_price=current_price,
@@ -1090,41 +1556,80 @@ async def monitor_positions_and_trade_multi_strategy(
                     
                     # 极端贪婪：禁止买入
                     if fear_greed_index > 90 or long_term_fear_greed_index > 90:
-                        print(f"[多策略买入] 极端贪婪({fear_greed_index:.1f})，禁止买入 {stock_name}({ts_code})")
+                        print(f"[多策略买入] {stock_name}({ts_code}): 极端贪婪({fear_greed_index:.1f})，禁止买入")
                         continue
                     
                     # 极端恐慌：仅允许极小仓位买入
                     elif fear_greed_index < 10:
-                        print(f"[多策略买入] 极端恐慌({fear_greed_index:.1f})，仅允许极小仓位买入 {stock_name}({ts_code})")
-                        await order_manager(ts_code, "买", current_price, min_amount, account)
+                        print(f"[多策略买入] {stock_name}({ts_code}): 极端恐慌({fear_greed_index:.1f})，仅允许极小仓位买入")
+                        await order_manager(
+                            ts_code,
+                            "买",
+                            buy_price,
+                            min_amount,
+                            account,
+                            min_order_value=position_params.get("min_position_value", 10000.0),
+                        )
                         buy_executed = True
                     
                     # 恐慌区间：小仓位买入
                     elif 10 <= fear_greed_index < 20:
-                        print(f"[多策略买入] 恐慌区间({fear_greed_index:.1f})，小仓位买入 {stock_name}({ts_code})")
-                        await order_manager(ts_code, "买", current_price, min_amount, account)
+                        print(f"[多策略买入] {stock_name}({ts_code}): 恐慌区间({fear_greed_index:.1f})，小仓位买入")
+                        await order_manager(
+                            ts_code,
+                            "买",
+                            buy_price,
+                            min_amount,
+                            account,
+                            min_order_value=position_params.get("min_position_value", 10000.0),
+                        )
                         buy_executed = True
                     
                     # 贪婪区间：小仓位买入
                     elif 80 < fear_greed_index <= 90 or 80 < long_term_fear_greed_index <= 90:
-                        print(f"[多策略买入] 贪婪区间({fear_greed_index:.1f})，小仓位买入 {stock_name}({ts_code})")
-                        await order_manager(ts_code, "买", current_price, min_amount, account)
+                        print(f"[多策略买入] {stock_name}({ts_code}): 贪婪区间({fear_greed_index:.1f})，小仓位买入")
+                        await order_manager(
+                            ts_code,
+                            "买",
+                            buy_price,
+                            min_amount,
+                            account,
+                            min_order_value=position_params.get("min_position_value", 10000.0),
+                        )
                         buy_executed = True
                     
                     # 市场恐慌：加大买入
                     elif fear_greed_index < 30 and long_term_fear_greed_index < 40:
-                        print(f"[多策略买入] 市场恐慌({fear_greed_index:.1f})，加大买入 {stock_name}({ts_code})")
-                        await order_manager(ts_code, "买", current_price, min_amount*2, account)
+                        print(f"[多策略买入] {stock_name}({ts_code}): 市场恐慌({fear_greed_index:.1f})，加大买入")
+                        await order_manager(
+                            ts_code,
+                            "买",
+                            buy_price,
+                            min_amount * 2,
+                            account,
+                            min_order_value=position_params.get("min_position_value", 10000.0),
+                        )
                         buy_executed = True
                     
-                    # 正常市场：根据技术指标判断
-                    elif technical_analyzer.is_buy_signal(indicators):
-                        print(f"[多策略买入] 正常买入 {stock_name}({ts_code})（技术指标买入信号）")
-                        await order_manager(ts_code, "买", current_price, min_amount, account)
+                    # 正常市场：问财已筛选过（突破均线、散户减少、龙头股），直接买入
+                    # 不再用 MA5 > MA20 二次过滤：问财选股本身就是买入信号，
+                    # MA5/MA20 金叉是滞后指标，开盘初期往往还没形成，会错过大量机会
+                    elif 20 <= fear_greed_index <= 80:
+                        print(f"[多策略买入] {stock_name}({ts_code}): 正常市场({fear_greed_index:.1f})，问财已选股，直接买入")
+                        await order_manager(
+                            ts_code,
+                            "买",
+                            buy_price,
+                            min_amount,
+                            account,
+                            min_order_value=position_params.get("min_position_value", 10000.0),
+                        )
                         buy_executed = True
                     
                     else:
-                        logger.debug(f"[多策略买入] {stock_name}({ts_code}): 未满足买入条件，跳过")
+                        # 走到这里说明恐贪指数不在任何已知区间（理论上不应发生）
+                        print(f"[多策略买入] {stock_name}({ts_code}): 恐贪指数={fear_greed_index:.1f}，未匹配任何买入条件，跳过")
+                        logger.warning(f"[多策略买入] {stock_name}({ts_code}): 恐贪指数={fear_greed_index:.1f}，未匹配任何买入分支，跳过")
                         continue
                     
                     # 如果执行了买入，更新当前持股数量
@@ -1154,7 +1659,8 @@ async def monitor_positions_and_trade_multi_strategy(
                         continue
                     
                     # 获取当前价格和持仓信息
-                    current_price = get_latest_price_func(symbol)
+                    # 卖出/风控链路：强制刷新最新价，避免缓存导致盈亏不实时
+                    current_price = get_latest_price_func(symbol, force_refresh=True)
                     if current_price is None or current_price <= 0:
                         logger.warning(f"{symbol}: 无法获取当前价格，跳过卖出检查")
                         continue
@@ -1200,6 +1706,50 @@ async def monitor_positions_and_trade_multi_strategy(
                     
                     # 计算盈亏比例
                     pnl_pct = ((current_price - avg_price) / avg_price * 100) if avg_price > 0 else 0
+
+                    # ====== 追踪止盈：记录持仓以来最高价/最高盈利，并在回撤时卖出 ======
+                    # 注意：追踪止盈信号必须在 sell_signals/sell_reasons 初始化之后再 append，
+                    # 否则会被后面的 sell_signals = [] 清空导致永远不生效。
+                    trailing_activate_pct = float(position_params.get("trailing_take_profit_activate_pct", 3.0))
+                    trailing_drawdown_pct = float(position_params.get("trailing_take_profit_drawdown_pct", 1.2))
+                    trailing_drawdown_pct = max(0.2, trailing_drawdown_pct)  # 防呆：至少0.2%
+
+                    peak = position_peak_cache.get(symbol)
+                    if peak is None:
+                        peak = {
+                            "peak_price": float(current_price),
+                            "peak_pnl_pct": float(pnl_pct),
+                            "updated_at": datetime.now(),
+                        }
+                        position_peak_cache[symbol] = peak
+                    else:
+                        # 更新最高价/最高盈利
+                        if current_price > float(peak.get("peak_price", 0) or 0):
+                            peak["peak_price"] = float(current_price)
+                            peak["updated_at"] = datetime.now()
+                        if pnl_pct > float(peak.get("peak_pnl_pct", -999) or -999):
+                            peak["peak_pnl_pct"] = float(pnl_pct)
+
+                    peak_price = float(peak.get("peak_price", current_price) or current_price)
+                    peak_pnl_pct = float(peak.get("peak_pnl_pct", pnl_pct) or pnl_pct)
+                    drawdown_from_peak_pct = (
+                        ((current_price - peak_price) / peak_price * 100) if peak_price > 0 else 0.0
+                    )
+
+                    # 2. 止盈：根据市场趋势动态调整止盈阈值，结合均线关系决定卖出时机
+                    # 牛市：20%，震荡市：15%，熊市：10%
+                    take_profit_threshold = market_trend.get('take_profit_threshold', 15.0)
+
+                    trailing_take_profit_hit = (
+                        peak_pnl_pct >= trailing_activate_pct
+                        and drawdown_from_peak_pct <= -trailing_drawdown_pct
+                    )
+                    # 未达到止盈线时，采用“峰值回撤止损”：从最高点回撤超过3%即止损
+                    peak_drawdown_stop_hit = (
+                        peak_pnl_pct < take_profit_threshold
+                        and peak_price > 0
+                        and drawdown_from_peak_pct <= -3.0
+                    )
                     
                     # 使用 IndicatorCalculator 计算更多技术指标
                     from utils.indicator_calculator import IndicatorCalculator
@@ -1229,6 +1779,30 @@ async def monitor_positions_and_trade_multi_strategy(
                     
                     # 标志位：是否处于"止盈持有"状态（达到止盈但趋势强劲，选择继续持有）
                     is_profit_holding = False
+
+                    # 0. 追踪止盈（移动止盈）：从峰值回撤触发
+                    if trailing_take_profit_hit:
+                        sell_signals.append(True)
+                        sell_reasons.append(
+                            f"追踪止盈(峰值盈利{peak_pnl_pct:.2f}%/峰值价{peak_price:.2f}，"
+                            f"当前价{current_price:.2f}，回撤{drawdown_from_peak_pct:.2f}%≤-{trailing_drawdown_pct:.2f}%)"
+                        )
+                        logger.info(
+                            f"{symbol}: 触发追踪止盈：peak_pnl={peak_pnl_pct:.2f}%, "
+                            f"peak_price={peak_price:.2f}, current={current_price:.2f}, "
+                            f"drawdown={drawdown_from_peak_pct:.2f}%"
+                        )
+                    elif peak_drawdown_stop_hit:
+                        sell_signals.append(True)
+                        sell_reasons.append(
+                            f"峰值回撤止损(未达止盈线{take_profit_threshold:.2f}%，"
+                            f"峰值价{peak_price:.2f}，当前价{current_price:.2f}，回撤{drawdown_from_peak_pct:.2f}%≤-3.00%)"
+                        )
+                        logger.warning(
+                            f"{symbol}: 触发峰值回撤止损：peak_pnl={peak_pnl_pct:.2f}%, "
+                            f"peak_price={peak_price:.2f}, current={current_price:.2f}, "
+                            f"drawdown={drawdown_from_peak_pct:.2f}%"
+                        )
                     
                     # 1. 止损：亏损超过3%（实盘严格止损，防止大幅亏损）
                     # 修复说明：原来-5%太松，改为-3%更安全
@@ -1236,10 +1810,15 @@ async def monitor_positions_and_trade_multi_strategy(
                         sell_signals.append(True)
                         sell_reasons.append(f"严格止损(亏损{pnl_pct:.2f}%)")
                         logger.warning(f"{symbol}: 触发严格止损，亏损{pnl_pct:.2f}%，立即卖出")
-                    
-                    # 2. 止盈：根据市场趋势动态调整止盈阈值，结合均线关系决定卖出时机
-                    # 牛市：20%，震荡市：15%，熊市：10%
-                    take_profit_threshold = market_trend.get('take_profit_threshold', 15.0)
+
+                    # 可视化日志：止盈检查（防止用户误以为只有止损逻辑）
+                    if pnl_pct > 0:
+                        print(
+                            f"[止盈检查] {symbol}: 当前盈利{pnl_pct:.2f}% / 止盈线{take_profit_threshold:.2f}% "
+                            f"(牛20/震15/熊10动态)，MA5={ma5 if ma5 is not None else 'N/A'}，"
+                            f"MA20={ma20 if ma20 is not None else 'N/A'}"
+                        )
+
                     if pnl_pct > take_profit_threshold:
                         # 达到止盈阈值后，根据均线关系和趋势强度决定是否卖出
                         if ma5 and ma20:
@@ -1274,8 +1853,17 @@ async def monitor_positions_and_trade_multi_strategy(
                             sell_reasons.append(f"止盈(盈利{pnl_pct:.2f}%，无均线数据)")
                             logger.warning(f"{symbol}: 达到止盈但无均线数据，保守止盈")
                     
-                    # 3. 均线死叉：MA5下穿MA20（仅在未达止盈或未处于止盈持有状态时检查，避免重复）
-                    if not is_profit_holding and pnl_pct <= take_profit_threshold:
+                    # 技术指标卖出：防抖参数（避免小幅盈利被噪声“抖出去”）
+                    # 约束规则：只有当浮盈 ≥ technical_sell_min_profit_pct（默认 8%）时，
+                    # 才允许技术指标（MACD 死叉、均线死叉、跌破 MA20、RSI 超买等）触发卖出。
+                    # 这样可以避免在刚刚上涨 1~2% 时因为 MACD 死叉等“低位信号”被提前洗出去。
+                    technical_sell_min_profit_pct = float(position_params.get('technical_sell_min_profit_pct', 8.0))
+                    macd_hist_confirm_bars = int(position_params.get('macd_hist_confirm_bars', 2))
+                    macd_hist_confirm_bars = max(1, macd_hist_confirm_bars)
+
+                    # 3. 均线死叉：MA5下穿MA20（仅在盈利且达到最小盈利阈值时检查，亏损时只允许止损）
+                    # 修复：亏损时不允许技术指标卖出，避免过早卖出
+                    if pnl_pct >= technical_sell_min_profit_pct and not is_profit_holding and pnl_pct <= take_profit_threshold:
                         if ma5 and ma20 and ma5 < ma20:
                             # 检查是否刚发生死叉（前一个周期MA5 >= MA20）
                             if len(df) >= 2:
@@ -1283,18 +1871,22 @@ async def monitor_positions_and_trade_multi_strategy(
                                 prev_ma20 = df['close'].rolling(window=20).mean().iloc[-2]
                                 if prev_ma5 >= prev_ma20:
                                     sell_signals.append(True)
-                                    sell_reasons.append("均线死叉(MA5下穿MA20)")
+                                    sell_reasons.append(f"均线死叉(MA5下穿MA20，盈利{pnl_pct:.2f}%)")
+                                    logger.info(f"{symbol}: 盈利时均线死叉，触发卖出")
                     
-                    # 4. 价格跌破20日均线且偏离超过2%（仅在未达止盈或未处于止盈持有状态时检查）
-                    if not is_profit_holding and pnl_pct <= take_profit_threshold:
+                    # 4. 价格跌破20日均线且偏离超过2%（仅在盈利且达到最小盈利阈值时检查，亏损时只允许止损）
+                    # 修复：亏损时不允许技术指标卖出，避免过早卖出
+                    if pnl_pct >= technical_sell_min_profit_pct and not is_profit_holding and pnl_pct <= take_profit_threshold:
                         if ma20 and current_price < ma20:
                             price_diff_pct = ((current_price - ma20) / ma20 * 100) if ma20 > 0 else 0
                             if price_diff_pct < -2:  # 低于MA20超过2%
                                 sell_signals.append(True)
-                                sell_reasons.append(f"跌破MA20(偏离{price_diff_pct:.2f}%)")
+                                sell_reasons.append(f"跌破MA20(偏离{price_diff_pct:.2f}%，盈利{pnl_pct:.2f}%)")
+                                logger.info(f"{symbol}: 盈利时跌破MA20，触发卖出")
                     
-                    # 5. RSI超买：RSI > 70（止盈持有状态下也检查，作为强制止盈信号）
-                    if rsi and rsi > 70:
+                    # 5. RSI超买：RSI > 70（仅在盈利且达到最小盈利阈值时检查，亏损时不允许RSI卖出）
+                    # 修复：亏损时不允许RSI卖出，避免过早卖出
+                    if pnl_pct >= technical_sell_min_profit_pct and rsi and rsi > 70:
                         if is_profit_holding:
                             # 止盈持有状态下，RSI超买作为强制止盈信号
                             sell_signals.append(True)
@@ -1302,10 +1894,12 @@ async def monitor_positions_and_trade_multi_strategy(
                             logger.info(f"{symbol}: 止盈持有状态下RSI超买，强制止盈")
                         else:
                             sell_signals.append(True)
-                            sell_reasons.append(f"RSI超买({rsi:.2f})")
+                            sell_reasons.append(f"RSI超买({rsi:.2f}，盈利{pnl_pct:.2f}%)")
+                            logger.info(f"{symbol}: 盈利时RSI超买，触发卖出")
                     
-                    # 6. MACD死叉：MACD下穿信号线（止盈持有状态下也检查，作为趋势转弱信号）
-                    if macd is not None and macd_signal is not None:
+                    # 6. MACD死叉：MACD下穿信号线（仅在盈利且达到最小盈利阈值时检查，亏损时不允许MACD卖出）
+                    # 修复：亏损时不允许MACD卖出，避免过早卖出
+                    if pnl_pct >= technical_sell_min_profit_pct and macd is not None and macd_signal is not None:
                         # 检查是否刚发生死叉
                         try:
                             prev_macd = indicator_calc.calculate(df.iloc[:-1], 'MACD_DIF')
@@ -1319,17 +1913,57 @@ async def monitor_positions_and_trade_multi_strategy(
                                         logger.info(f"{symbol}: 止盈持有状态下MACD死叉，趋势转弱，止盈离场")
                                     else:
                                         sell_signals.append(True)
-                                        sell_reasons.append("MACD死叉")
+                                        sell_reasons.append(f"MACD死叉(盈利{pnl_pct:.2f}%)")
+                                        logger.info(f"{symbol}: 盈利时MACD死叉，触发卖出")
                         except:
                             pass
                     
-                    # 7. MACD柱状图转负（仅在未处于止盈持有状态时检查，避免过于敏感）
-                    if not is_profit_holding and macd_hist is not None and macd_hist < 0:
-                        sell_signals.append(True)
-                        sell_reasons.append(f"MACD柱状图转负({macd_hist:.4f})")
+                    # 7. MACD柱状图转负（仅在盈利且达到最小盈利阈值时检查，亏损时不允许MACD卖出）
+                    # 修复：亏损时不允许MACD卖出，避免过早卖出
+                    if pnl_pct >= technical_sell_min_profit_pct and not is_profit_holding and macd_hist is not None:
+                        # 连续确认：默认需要最近N根K线柱状图均为负，降低单根噪声触发
+                        should_macd_hist_sell = macd_hist < 0
+                        if should_macd_hist_sell and macd_hist_confirm_bars >= 2:
+                            try:
+                                confirm_ok = True
+                                tmp_df = df.copy()
+                                # 逐根回溯确认（最多确认N根）
+                                for _ in range(macd_hist_confirm_bars - 1):
+                                    if len(tmp_df) < 2:
+                                        confirm_ok = False
+                                        break
+                                    tmp_df = tmp_df.iloc[:-1]
+                                    tmp_res = indicator_calc.calculate(tmp_df, 'MACD')
+                                    tmp_hist = tmp_res.get('histogram') if isinstance(tmp_res, dict) else None
+                                    if tmp_hist is None or tmp_hist >= 0:
+                                        confirm_ok = False
+                                        break
+                                should_macd_hist_sell = confirm_ok
+                            except Exception as e:
+                                logger.debug(f"{symbol}: MACD柱状图连续确认失败: {e}，退化为单根判断")
+                                should_macd_hist_sell = (macd_hist < 0)
+
+                        if should_macd_hist_sell:
+                            sell_signals.append(True)
+                            sell_reasons.append(
+                                f"MACD柱状图连续{macd_hist_confirm_bars}根转负({macd_hist:.4f}，盈利{pnl_pct:.2f}%)"
+                            )
+                            logger.info(f"{symbol}: 盈利且满足最小盈利阈值时MACD柱状图转负(连续确认)，触发卖出")
+                        else:
+                            logger.info(
+                                f"{symbol}: MACD柱状图转负但未满足连续确认({macd_hist_confirm_bars}根)，暂不卖出"
+                            )
+
+                    # 额外可读日志：盈利太小不参与技术卖出（避免用户误解“止盈/止损没生效”）
+                    if 0 < pnl_pct < technical_sell_min_profit_pct and not is_profit_holding:
+                        logger.info(
+                            f"{symbol}: 当前盈利{pnl_pct:.2f}% < 技术卖出最小盈利阈值{technical_sell_min_profit_pct:.2f}%，"
+                            f"忽略技术指标卖出（避免抖动）"
+                        )
                     
                     # 8. 市场情绪：极端贪婪时考虑止盈卖出（止盈持有状态下也检查）
-                    if fear_greed_index > 80 and pnl_pct > 5:
+                    # 修复：亏损时不允许市场情绪卖出，避免过早卖出（已有pnl_pct > 5限制，确保只在盈利时触发）
+                    if pnl_pct > 0 and fear_greed_index > 80 and pnl_pct > 5:
                         if is_profit_holding:
                             sell_signals.append(True)
                             sell_reasons.append(f"止盈持有+市场极端贪婪(恐贪指数{fear_greed_index:.1f})，强制止盈")
@@ -1338,72 +1972,184 @@ async def monitor_positions_and_trade_multi_strategy(
                             sell_signals.append(True)
                             sell_reasons.append(f"市场贪婪(恐贪指数{fear_greed_index:.1f})且盈利{pnl_pct:.2f}%")
                     
-                    # 9. 恐慌市场：降低止损阈值，但不禁止技术止损
-                    # 修复说明：原逻辑会过滤掉所有卖出信号，导致错过止损时机
-                    if fear_greed_index < 20:
-                        # 恐慌市场时，如果亏损在-2%到0之间，过滤掉非关键信号（保留止损和强烈技术信号）
-                        if -2 <= pnl_pct < 0:
-                            # 只保留止损信号和强烈技术信号（均线死叉、价格跌破MA20）
-                            filtered_signals = []
-                            filtered_reasons = []
-                            for i, reason in enumerate(sell_reasons):
-                                # 保留：止损、均线死叉、跌破MA20（这些是强烈风险信号）
-                                if any(keyword in reason for keyword in ['止损', '均线死叉', '跌破MA20']):
-                                    filtered_signals.append(sell_signals[i])
-                                    filtered_reasons.append(reason)
-                            sell_signals = filtered_signals
-                            sell_reasons = filtered_reasons
-                            if not sell_signals:
-                                logger.info(f"{symbol}: 恐慌市场且小幅亏损({pnl_pct:.2f}%)，暂不卖出")
-                        # 如果亏损超过-2%，保留所有止损信号
-                        elif pnl_pct < -2:
-                            logger.warning(f"{symbol}: 恐慌市场但亏损已达{pnl_pct:.2f}%，执行止损")
+                    # 9. 亏损保护：亏损时（pnl_pct < 0）只允许止损卖出，禁止所有技术指标卖出
+                    # 修复：确保亏损时只保留真正的止损信号（pnl_pct < -3），过滤掉所有其他信号
+                    # 这是最后一道防线，防止任何技术指标在亏损时触发卖出
+                    if pnl_pct < 0:
+                        # 只保留真正的止损信号（亏损超过-3%）
+                        filtered_signals = []
+                        filtered_reasons = []
+                        for i, reason in enumerate(sell_reasons):
+                            # 只保留包含"严格止损"的信号（这是唯一在亏损时应该保留的信号）
+                            if '严格止损' in reason:
+                                filtered_signals.append(sell_signals[i])
+                                filtered_reasons.append(reason)
+                            else:
+                                # 过滤掉所有非止损信号（包括技术指标信号）
+                                logger.warning(
+                                    f"{symbol}: 亏损{pnl_pct:.2f}%时过滤掉非止损信号: {reason}（亏损时只允许止损卖出）"
+                                )
+                                print(f"[亏损保护] {symbol}: 亏损{pnl_pct:.2f}%时过滤掉非止损信号: {reason}")
+                        
+                        sell_signals = filtered_signals
+                        sell_reasons = filtered_reasons
+                        
+                        # 如果亏损超过-3%但没有止损信号，强制添加止损信号（安全保护）
+                        if pnl_pct < -3 and not sell_signals:
+                            sell_signals.append(True)
+                            sell_reasons.append(f"严格止损(亏损{pnl_pct:.2f}%)")
+                            logger.warning(f"{symbol}: 亏损{pnl_pct:.2f}%但无止损信号，强制添加止损信号")
+                        elif not sell_signals:
+                            logger.info(f"{symbol}: 亏损{pnl_pct:.2f}%但未达止损线(-3%)，暂不卖出")
+                            print(f"[亏损保护] {symbol}: 亏损{pnl_pct:.2f}%未达止损线(-3%)，暂不卖出")
                     
                     # 综合判断：满足任一卖出条件即可卖出
                     should_sell = any(sell_signals) if sell_signals else False
                     
+                    # 调试信息：打印所有卖出信号（无论是否卖出）
+                    if sell_signals:
+                        logger.debug(f"[卖出检查] {symbol}: 当前盈亏={pnl_pct:.2f}%, 卖出信号数量={len(sell_signals)}")
+                        logger.debug(f"[卖出检查] {symbol}: 卖出原因列表={sell_reasons}")
+                        if pnl_pct < 0:
+                            logger.debug(f"[卖出检查] {symbol}: 当前处于亏损状态，只允许止损卖出（止损线=-3%）")
+                    
                     if should_sell:
                         reason_str = "、".join(sell_reasons)
-                        logger.info(f"[多策略卖出] {symbol}: 触发卖出信号 - {reason_str}")
                         # 格式化指标值，处理None情况
                         ma5_str = f"{ma5:.2f}" if ma5 is not None else "N/A"
                         ma20_str = f"{ma20:.2f}" if ma20 is not None else "N/A"
                         rsi_str = f"{rsi:.2f}" if rsi is not None else "N/A"
-                        logger.info(f"[多策略卖出] {symbol}: 价格={current_price:.2f}, 成本={avg_price:.2f}, 盈亏={pnl_pct:.2f}%, "
+                        
+                        # 增强日志输出：明确显示卖出类型（止损/止盈/技术指标）
+                        sell_type = "止损" if pnl_pct < -3 else "止盈" if pnl_pct > take_profit_threshold else "技术指标"
+                        logger.info(f"[多策略卖出] {symbol}: 触发卖出信号 - {reason_str}")
+                        logger.info(f"[多策略卖出] {symbol}: 卖出类型={sell_type}, 价格={current_price:.2f}, 成本={avg_price:.2f}, 盈亏={pnl_pct:.2f}%, "
                                    f"MA5={ma5_str}, MA20={ma20_str}, "
                                    f"RSI={rsi_str}, 持仓={available_volume}股")
+                        
+                        # 增强控制台输出：明确显示卖出原因和盈亏情况
+                        print(f"\n{'='*60}")
                         print(f"[多策略卖出] {symbol}: {reason_str}")
-                        print(f"  价格={current_price:.2f}, 成本={avg_price:.2f}, 盈亏={pnl_pct:.2f}%, "
-                              f"MA5={ma5_str}, MA20={ma20_str}, "
-                              f"RSI={rsi_str}")
+                        print(f"[多策略卖出] 卖出类型: {sell_type}")
+                        print(f"[多策略卖出] 价格={current_price:.2f}, 成本={avg_price:.2f}, 盈亏={pnl_pct:.2f}%")
+                        print(f"[多策略卖出] 技术指标: MA5={ma5_str}, MA20={ma20_str}, RSI={rsi_str}")
+                        print(f"[多策略卖出] 可用持仓={available_volume}股, 总持仓={total_volume}股")
+                        print(f"{'='*60}\n")
                         
                         # 执行卖出：只卖出可用持仓（已考虑T+1规则）
                         # 注意：available_volume 已经由券商计算，排除了当日买入的股票
                         if available_volume > 0:
-                            # A股交易规则：最小委托单位100股，必须是100的整数倍
-                            # 将卖出数量调整为100的整数倍（向下取整）
-                            min_unit = 100
-                            # 卖出限制：一笔最大100万股
-                            MAX_SELL_QUANTITY = 1000000
-                            sell_quantity = min(available_volume, MAX_SELL_QUANTITY)
-                            sell_quantity = (sell_quantity // min_unit) * min_unit
-                            
-                            if sell_quantity < min_unit:
-                                logger.warning(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股不足100股，无法卖出（A股最小委托单位100股）")
-                                print(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股不足100股，无法卖出")
+                            # A股交易规则：最小委托单位100股（科创板200股），必须是整数倍
+                            # 科创板单笔最大委托：1000手（100000股）；普通A股：9000手（900000股）
+                            if symbol.startswith('688'):
+                                min_unit = 200
+                                MAX_SELL_QUANTITY = 100000  # 科创板单笔最大1000手
                             else:
-                                if sell_quantity < available_volume:
-                                    if available_volume > MAX_SELL_QUANTITY:
-                                        logger.info(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股超过单笔最大限制{MAX_SELL_QUANTITY}股，限制为{sell_quantity}股")
-                                    else:
-                                        logger.info(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股，调整为{sell_quantity}股（100的整数倍）")
-                                    print(f"[多策略卖出] {symbol}: 可用持仓{available_volume}股，调整为{sell_quantity}股（100的整数倍）")
-                                
-                                await order_manager(symbol, "卖", current_price, sell_quantity, account)
-                                logger.info(f"[多策略卖出] {symbol}: 已提交卖出订单，数量={sell_quantity}股（可用{available_volume}股，总持仓{total_volume}股），价格={current_price:.2f}")
+                                min_unit = 100
+                                MAX_SELL_QUANTITY = 900000  # 普通A股单笔最大9000手
+
+                            if available_volume < min_unit:
+                                logger.warning(
+                                    f"[多策略卖出] {symbol}: 可用持仓{available_volume}股不足100股，无法卖出（A股最小委托单位100股）"
+                                )
+                                print(
+                                    f"[多策略卖出] {symbol}: 可用持仓{available_volume}股不足100股，无法卖出"
+                                )
+                                # 记录卖出失败事件（可用股数不足 100 股）
+                                try:
+                                    record_trade_event(
+                                        event_type="卖出失败",
+                                        symbol=symbol,
+                                        side="卖",
+                                        reason=(
+                                            f"可用持仓{available_volume}股不足100股，"
+                                            "无法卖出（A股最小委托单位100股）"
+                                        ),
+                                        pnl_pct=pnl_pct,
+                                        extra={
+                                            "可用持仓": int(available_volume),
+                                            "总持仓": int(total_volume),
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+                            else:
+                                # 计算需要分几批卖出
+                                total_to_sell = (min(available_volume, available_volume) // min_unit) * min_unit
+                                batches = []
+                                remaining = total_to_sell
+                                while remaining > 0:
+                                    batch = min(remaining, MAX_SELL_QUANTITY)
+                                    batch = (batch // min_unit) * min_unit
+                                    if batch < min_unit:
+                                        break
+                                    batches.append(batch)
+                                    remaining -= batch
+
+                                batch_count = len(batches)
+                                if batch_count > 1:
+                                    logger.info(
+                                        f"[多策略卖出] {symbol}: 可用持仓{available_volume}股超过单批最大{MAX_SELL_QUANTITY}股（10000手），"
+                                        f"分{batch_count}批卖出，每批最多{MAX_SELL_QUANTITY}股"
+                                    )
+                                    print(
+                                        f"[多策略卖出] {symbol}: 持仓{available_volume}股，分{batch_count}批卖出，每批最多10000手"
+                                    )
+
+                                # 记录卖出下单事件
+                                try:
+                                    record_trade_event(
+                                        event_type="卖出下单",
+                                        symbol=symbol,
+                                        side="卖",
+                                        reason=reason_str,
+                                        pnl_pct=pnl_pct,
+                                        extra={
+                                            "卖出类型": sell_type,
+                                            "卖出总数量": int(total_to_sell),
+                                            "分批数量": batch_count,
+                                            "可用持仓": int(available_volume),
+                                            "总持仓": int(total_volume),
+                                            "卖出价格": float(current_price),
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+
+                                # 逐批下单
+                                for i, batch_qty in enumerate(batches, 1):
+                                    if batch_count > 1:
+                                        logger.info(
+                                            f"[多策略卖出] {symbol}: 第{i}/{batch_count}批，卖出{batch_qty}股"
+                                        )
+                                    await order_manager(symbol, "卖", current_price, batch_qty, account)
+
+                                sell_quantity = total_to_sell  # 供后续日志使用
+                                logger.info(
+                                    f"[多策略卖出] {symbol}: 已提交卖出订单，数量={sell_quantity}股（可用{available_volume}股，总持仓{total_volume}股），价格={current_price:.2f}"
+                                )
                         else:
-                            logger.warning(f"[多策略卖出] {symbol}: 无可用持仓（T+1限制），无法卖出")
-                            print(f"[T+1限制] {symbol}: 当日买入的股票不能当日卖出，无法执行卖出订单")
+                            logger.warning(
+                                f"[多策略卖出] {symbol}: 无可用持仓（T+1限制），无法卖出"
+                            )
+                            print(
+                                f"[T+1限制] {symbol}: 当日买入的股票不能当日卖出，无法执行卖出订单"
+                            )
+                            # 记录 T+1 限制导致的卖出失败
+                            try:
+                                record_trade_event(
+                                    event_type="卖出失败",
+                                    symbol=symbol,
+                                    side="卖",
+                                    reason="T+1限制：当日买入的股票不能当日卖出，无法执行卖出订单",
+                                    pnl_pct=pnl_pct,
+                                    extra={
+                                        "可用持仓": int(available_volume),
+                                        "总持仓": int(total_volume),
+                                    },
+                                )
+                            except Exception:
+                                pass
                     else:
                         # 记录持有原因
                         hold_reasons = []
@@ -1423,6 +2169,39 @@ async def monitor_positions_and_trade_multi_strategy(
                     logger.error(f"[多策略卖出] {symbol}: 卖出检查失败: {e}", exc_info=True)
                     print(f"[多策略卖出] {symbol}: 卖出检查失败: {e}")
             
+            # 收盘后输出一次“市场广度覆盖触发”日报（14:55后，每日仅一次）
+            report_time = datetime.now().time()
+            if report_time >= time(14, 55) and _breadth_report_cache.get('last_report_time') != today_str:
+                trigger_count = int(_breadth_report_cache.get('trigger_count', 0) or 0)
+                baseline_asset = _breadth_report_cache.get('baseline_asset')
+                last_asset = _breadth_report_cache.get('last_asset')
+                max_asset = _breadth_report_cache.get('max_asset_after_trigger')
+                min_asset = _breadth_report_cache.get('min_asset_after_trigger')
+
+                if trigger_count > 0 and baseline_asset and last_asset:
+                    pnl_pct_after_trigger = (last_asset - baseline_asset) / baseline_asset * 100
+                    max_pnl_pct = (max_asset - baseline_asset) / baseline_asset * 100 if max_asset else 0.0
+                    max_drawdown_pct = (min_asset - baseline_asset) / baseline_asset * 100 if min_asset else 0.0
+
+                    logger.info(
+                        f"[市场广度日报] 日期={today_str}, 触发次数={trigger_count}, "
+                        f"首次触发={_breadth_report_cache.get('first_trigger_time')}, "
+                        f"触发后收益={pnl_pct_after_trigger:.2f}%, "
+                        f"触发后峰值收益={max_pnl_pct:.2f}%, "
+                        f"触发后最大回撤={max_drawdown_pct:.2f}%"
+                    )
+                    logger.info(
+                        f"[市场广度日报] 触发时刻列表: {_breadth_report_cache.get('trigger_times', [])}"
+                    )
+                    print(
+                        f"[市场广度日报] 触发{trigger_count}次，触发后收益{pnl_pct_after_trigger:.2f}%，"
+                        f"峰值{max_pnl_pct:.2f}%，最大回撤{max_drawdown_pct:.2f}%"
+                    )
+                else:
+                    logger.info(f"[市场广度日报] 日期={today_str}, 当日未触发广度覆盖或基线资产不可用")
+
+                _breadth_report_cache['last_report_time'] = today_str
+
             # 持仓分析结果打印
             # print("[多策略持仓监控] 最新持仓分析:", analysis)
             
@@ -1747,6 +2526,8 @@ def get_min_buy_amount(
     except Exception as e:
         logger.error(f"{symbol}: 计算买入股数失败: {e}，返回最小买入单位 {min_unit}", exc_info=True)
         return min_unit
-def get_latest_price_func(symbol, xt_trader=None):
+def get_latest_price_func(symbol, xt_trader=None, **kwargs):
+    """代理到 main.get_latest_price_func，允许透传 force_refresh/max_age_sec 等参数"""
     from main import get_latest_price_func as main_get_latest_price_func
-    return main_get_latest_price_func(symbol)
+    return main_get_latest_price_func(symbol, xt_trader, **kwargs)
+

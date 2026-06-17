@@ -83,34 +83,32 @@ async def async_select_by_wencai(query: str) -> List[Dict[str, Any]]:
 
 def is_strictly_decreasing(sequence: List[float]) -> bool:
     """
-    判断序列是否严格递减
+    判断散户数量序列是否呈现减少趋势（主力介入信号）
     
-    满足以下任一条件即返回True：
-    1. 序列严格递减（前一个元素大于后一个元素，即 x > y）
-    2. 序列的和小于等于平均值的负2倍（说明整体下降趋势明显）
+    背景：问财返回的「区间dde散户数量」为负数时，表示散户在净流出（减少），
+    值越负说明散户出逃越多，主力介入越强。
+    
+    满足以下任一条件即返回True（表示散户持续减少，主力持续介入）：
+    1. 序列严格递减（后一个元素 < 前一个元素，即散户数量越来越少）
+    2. 序列均值为负数（说明整体上散户处于净流出状态）
     
     Args:
-        sequence: 数值序列
+        sequence: 近N日「区间dde散户数量」数值列表（负数表示散户减少）
         
     Returns:
-        bool: 如果满足条件返回True，否则返回False
+        bool: 如果散户持续减少（主力介入）返回True，否则返回False
     """
     if len(sequence) < 2:
         return False
     
-    # 条件1：检查是否严格递增
-    is_increasing = all(x < y for x, y in zip(sequence[:-1], sequence[1:]))
-    if is_increasing:
+    # 条件1：严格递减（散户数量逐日减少，加速出逃）
+    is_decreasing = all(x > y for x, y in zip(sequence[:-1], sequence[1:]))
+    if is_decreasing:
         return True
     
-    # 条件2：检查序列和是否 <= 平均值的2倍
-    sequence_sum = sum(sequence)
-    average = sequence_sum / len(sequence)
-    # 平均值的2倍
-    two_times_avg = 2 * average
-    
-    # 如果序列和 <= 平均值的2倍，返回True
-    if sequence_sum <= two_times_avg:
+    # 条件2：均值为负（整体上散户处于净流出状态，主力持续介入）
+    average = sum(sequence) / len(sequence)
+    if average < 0:
         return True
     
     return False
@@ -272,7 +270,7 @@ async def async_select_stocks_by_wencai(
     异步问财智能选股主函数
     
     Args:
-        question_list: 问财查询语句列表，例如：["突破十日均线，散户数量下降，龙头股，剔除st"]
+        question_list: 问财查询语句列表，例如：["最近热点题材，突破十日均线，散户数量小于-100，剔除st，剔除退市警告股"]
         filter_by_retail_investor: 是否根据散户数量变化进行筛选（默认True）
         include_info: 是否包含股票详细信息（默认False，仅返回代码列表）
         
@@ -283,7 +281,7 @@ async def async_select_stocks_by_wencai(
         
     Example:
         >>> import asyncio
-        >>> questions = ["突破十日均线，散户数量下降，龙头股，剔除st"]
+        >>> questions = ["最近热点题材，突破十日均线，散户数量小于-100，剔除st，剔除退市警告股"]
         >>> # 仅返回代码列表
         >>> result = asyncio.run(async_select_stocks_by_wencai(questions, include_info=False))
         >>> print(result)
@@ -344,7 +342,7 @@ async def main():
     """主程序入口"""
     question_list = []
     # question_list.append("突破十日均线，散户数量下降")
-    # question_list.append("突破十日均线，散户数量下降，龙头股，剔除st")
+    # question_list.append("最近热点题材，突破十日均线，散户数量小于-100，剔除st，剔除退市警告股")
     question_list.append("资金扎堆涌入的票,剔除ST，剔除京交所，连续上涨，当下热点")
     
     # 使用异步函数获取股票列表（包含详细信息）

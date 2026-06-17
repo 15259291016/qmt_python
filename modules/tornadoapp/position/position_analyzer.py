@@ -19,6 +19,11 @@ class PositionAnalyzer:
     def __init__(self, tushare_token: str):
         self.pro = ts.pro_api(tushare_token)
         self.tushare_token = tushare_token # 新增：存储tushare_token
+        # 缓存最近可用的全市场daily数据，避免盘中反复告警
+        self._latest_market_daily_cache: Optional[pd.DataFrame] = None
+        self._latest_market_daily_trade_date: Optional[str] = None
+        self._latest_market_daily_cache_time: Optional[datetime] = None
+        self._last_market_daily_warning_key: Optional[str] = None
         
     def calculate_position_metrics(self, position: Position) -> Position:
         """计算单个持仓的指标"""
@@ -107,21 +112,66 @@ class PositionAnalyzer:
             recommendations=recommendations
         )
     
+    def _get_latest_available_market_daily(self) -> Optional[pd.DataFrame]:
+        """
+        获取最近可用的全市场 daily 数据。
+        优先当日，若当日为空则回退最近可用交易日；并做短时缓存减少重复请求和告警。
+        """
+        try:
+            now = datetime.now()
+            # 60秒内复用缓存
+            if (
+                self._latest_market_daily_cache is not None
+                and self._latest_market_daily_cache_time is not None
+                and (now - self._latest_market_daily_cache_time).total_seconds() < 60
+            ):
+                return self._latest_market_daily_cache
+
+            today_str = now.strftime('%Y%m%d')
+            daily = self.pro.daily(trade_date=today_str)
+            trade_date_used = today_str
+
+            # 盘中经常拿不到当天daily，回退到最近可用交易日
+            if daily is None or daily.empty:
+                start_date = (now - timedelta(days=10)).strftime('%Y%m%d')
+                hist = self.pro.daily(start_date=start_date, end_date=today_str)
+                if hist is not None and not hist.empty and 'trade_date' in hist.columns:
+                    latest_trade_date = str(hist['trade_date'].max())
+                    daily = hist[hist['trade_date'] == latest_trade_date].copy()
+                    trade_date_used = latest_trade_date
+                    warn_key = f"fallback:{today_str}->{latest_trade_date}"
+                    if self._last_market_daily_warning_key != warn_key:
+                        logger.warning(
+                            f"[市场数据] 当天daily为空({today_str})，已回退到最近交易日: {latest_trade_date}"
+                        )
+                        self._last_market_daily_warning_key = warn_key
+                else:
+                    warn_key = f"empty:{today_str}"
+                    if self._last_market_daily_warning_key != warn_key:
+                        logger.warning(f"[市场数据] 当天及近10天daily均为空，日期: {today_str}")
+                        self._last_market_daily_warning_key = warn_key
+                    return None
+
+            if daily is None or daily.empty:
+                return None
+
+            self._latest_market_daily_cache = daily
+            self._latest_market_daily_trade_date = trade_date_used
+            self._latest_market_daily_cache_time = now
+            return daily
+        except Exception as e:
+            logger.warning(f"[市场数据] 获取最近可用daily失败: {e}")
+            return None
+
     def calculate_fear_greed_index(self) -> float:
         """基于全市场数据估算恐贪指数，0-100"""
         try:
-            import tushare as ts
-            pro = ts.pro_api(self.tushare_token)
             from datetime import datetime, timedelta
-            import pandas as pd
-            
+
             today = datetime.now()
-            today_str = today.strftime('%Y%m%d')
-            
-            # 获取当天数据
-            daily = pro.daily(trade_date=today_str)
+            daily = self._get_latest_available_market_daily()
             if daily is None or daily.empty:
-                logger.warning(f"[恐贪指数] 当天数据为空，日期: {today_str}")
+                logger.warning(f"[恐贪指数] 全市场daily不可用，日期: {today.strftime('%Y%m%d')}")
                 return None
             
             # 1. 涨跌家数
@@ -149,7 +199,7 @@ class PositionAnalyzer:
             # 获取近20天的历史数据计算平均值
             start_date = (today - timedelta(days=30)).strftime('%Y%m%d')  # 多取几天防止节假日
             end_date = (today - timedelta(days=1)).strftime('%Y%m%d')  # 不包含今天
-            hist_daily = pro.daily(start_date=start_date, end_date=end_date)
+            hist_daily = self.pro.daily(start_date=start_date, end_date=end_date)
             
             if hist_daily is not None and not hist_daily.empty and 'amount' in hist_daily.columns:
                 # 计算近20个交易日的日均成交额
@@ -182,6 +232,57 @@ class PositionAnalyzer:
         except Exception as e:
             logger.error(f"[恐贪指数] 全市场数据获取失败: {e}", exc_info=True)
             print(f"[恐贪指数] 全市场数据获取失败，使用持仓估算法: {e}")
+            return None
+
+    def get_market_breadth_snapshot(self) -> Optional[Dict[str, float]]:
+        """
+        获取市场广度快照（上涨家数占比、涨停跌停差等）。
+
+        Returns:
+            {
+                'up_count': int,
+                'down_count': int,
+                'flat_count': int,
+                'total_count': int,
+                'up_ratio': float,          # 上涨家数占比 0-1
+                'limit_up_count': int,
+                'limit_down_count': int,
+                'limit_spread_ratio': float # 涨停跌停差占比 -1~1
+            }
+            获取失败时返回None
+        """
+        try:
+            daily = self._get_latest_available_market_daily()
+            if daily is None or daily.empty:
+                logger.warning("[市场广度] 全市场daily不可用")
+                return None
+
+            total_count = len(daily)
+            if total_count <= 0:
+                return None
+
+            up_count = int((daily['pct_chg'] > 0).sum())
+            down_count = int((daily['pct_chg'] < 0).sum())
+            flat_count = int(total_count - up_count - down_count)
+            up_ratio = up_count / total_count
+
+            limit_up_count = int((daily['pct_chg'] > 9.5).sum())
+            limit_down_count = int((daily['pct_chg'] < -9.5).sum())
+            limit_spread_ratio = (limit_up_count - limit_down_count) / total_count
+            limit_spread_ratio = float(max(min(limit_spread_ratio * 10, 1.0), -1.0))
+
+            return {
+                'up_count': up_count,
+                'down_count': down_count,
+                'flat_count': flat_count,
+                'total_count': int(total_count),
+                'up_ratio': float(up_ratio),
+                'limit_up_count': limit_up_count,
+                'limit_down_count': limit_down_count,
+                'limit_spread_ratio': limit_spread_ratio,
+            }
+        except Exception as e:
+            logger.warning(f"[市场广度] 获取失败: {e}")
             return None
 
     def calculate_long_term_fear_greed_index(self, window: int = 20) -> float:

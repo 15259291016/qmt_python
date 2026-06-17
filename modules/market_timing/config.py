@@ -13,6 +13,25 @@ MARKET_TIMING_CONFIG = {
     'check_interval': 30,  # 市场检查间隔（秒）
     'min_buy_interval': 180,  # 最小买入间隔（秒），防止频繁交易
     
+    # 市场状态买入激进程度（越大越敢买）
+    'market_aggressiveness': {
+        'bull': 1.20,     # 牛市：更积极
+        'neutral': 1.00,  # 震荡市：标准
+        'bear': 0.80,     # 熊市：更保守
+    },
+    
+    # 启动型强势票独立通道
+    'breakout': {
+        'enabled': True,
+        'min_market_trend': 'neutral',   # bull/neutral 才允许
+        'min_score': 78.0,               # 启动型票最低总分
+        'min_trend_score': 70.0,         # 趋势分门槛
+        'min_volume_score': 65.0,        # 量能分门槛
+        'min_rs_score': 60.0,            # 相对强弱门槛
+        'max_daily_rise_pct': 8.0,       # 日内涨幅过大则不追
+        'min_breakout_high_pct': 0.0,    # 突破前高/20日高点的最小要求
+    },
+    
     # 信号阈值（降低阈值=更容易买入，提高阈值=更谨慎）
     'thresholds': {
         'strong': 0.55,   # 强买入信号阈值（原0.6）
@@ -125,6 +144,32 @@ STOCK_SELECTION_PERIODS = [
     ('14:00', '14:30')   # 下午：30分钟，避开尾盘波动
 ]
 
+# ========== 市场广度修正配置 ==========
+MARKET_BREADTH_CONFIG = {
+    # 当上涨家数占比达到该阈值时，即使指数趋势偏空，也可放开上午买入窗口
+    'morning_buy_override_up_ratio': 0.68,
+    # 市场广度因子在综合市场趋势得分中的权重
+    'breadth_weight': 0.25,
+}
+
+# ========== 候选股二次评分配置 ==========
+STOCK_RANKING_CONFIG = {
+    # 最终保留的候选数量
+    'top_n': 3,
+    # 过滤门槛
+    'min_total_score': 70.0,
+    'min_trend_score': 60.0,
+    'min_volume_score': 50.0,
+    # 分项权重（总和建议为1.0）
+    'weights': {
+        'trend': 0.30,
+        'volume': 0.20,
+        'rs': 0.20,
+        'risk': 0.15,
+        'liquidity': 0.15,
+    }
+}
+
 # ========== 风险偏好预设 ==========
 # 用户可以选择不同的风险偏好，系统会自动调整参数
 
@@ -196,5 +241,6 @@ MARKET_TIMING_CONFIG['thresholds']['weak'] = 0.25
 MARKET_TIMING_CONFIG['weights']['rsi'] = 0.25
 MARKET_TIMING_CONFIG['min_buy_interval'] = 300
 """
+
 
 

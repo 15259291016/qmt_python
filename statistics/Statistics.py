@@ -75,7 +75,7 @@ from sqlalchemy import create_engine
 #tushare_token=gx03013e909f633ecb66722df66b360f070426613316ebf06ecd3482
 
 ## Tushare API token
-tushare_token="gx03013e909f633ecb66722df66b360f070426613316ebf06ecd3482"
+tushare_token="d78dd56431844928f2af3ecc8810a03ca24abada7300ce33c9659308"
 ts.set_token(tushare_token)  # 替换为你的Tushare API token
 pro = ts.pro_api()
 

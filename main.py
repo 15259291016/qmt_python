@@ -3,6 +3,7 @@ import asyncio
 import logging
 import pandas as pd
 import threading
+from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import tushare as ts
@@ -10,7 +11,6 @@ from xtquant.xttrader import XtQuantTrader
 from xtquant.xttype import StockAccount
 from modules.tornadoapp.db.dbUtil import init_beanie
 from utils.data import download_all_data
-from utils.callback import MyXtQuantTraderCallback
 from utils.date_util import is_trading_time
 from xtquant.xttrader import XtQuantTrader
 from utils.environment_manager import get_env_manager
@@ -193,21 +193,252 @@ def get_history_func(symbol, tushare_token=None):
             return cached_data
         return None
 
-def get_latest_price_func(symbol, xt_trader=None):
-    """优先用缓存，无则用xtdata.get_full_tick兜底获取最新价"""
-    price = latest_price_cache.get(symbol)
-    if price is not None:
-        return price
+def get_latest_price_func(
+    symbol: str,
+    xt_trader=None,
+    *,
+    force_refresh: bool = False,
+    max_age_sec: float = 2.0,
+):
+    """获取最新价（实盘尽量实时）
+
+    设计说明：
+    - 之前逻辑是“缓存优先且永不过期”，会导致价格长期不刷新，进而盈亏百分比看起来不实时。
+    - 现在改为带TTL缓存：默认缓存最多保留 max_age_sec 秒；超过则重新拉取 tick。
+    - 对风控/卖出检查可传 force_refresh=True 强制走 tick。
+    """
     try:
+        now_ts = datetime.now().timestamp()
+        cached = latest_price_cache.get(symbol)
+        if not force_refresh and cached is not None:
+            # 兼容旧格式：可能缓存的是 float，也可能是 (price, ts)
+            if isinstance(cached, tuple) and len(cached) == 2:
+                cached_price, cached_ts = cached
+                if cached_price is not None and (now_ts - float(cached_ts)) <= float(max_age_sec):
+                    return float(cached_price)
+            else:
+                # 旧缓存没有时间戳：不再无限期使用，视为过期，走实时tick刷新
+                pass
+
         from xtquant import xtdata
         tick_info = xtdata.get_full_tick([symbol])
         if symbol in tick_info and 'lastPrice' in tick_info[symbol]:
             price = tick_info[symbol]['lastPrice']
-            latest_price_cache[symbol] = price
+            # 缓存为 (price, ts)
+            latest_price_cache[symbol] = (price, now_ts)
             return price
     except Exception as e:
         print(f"xtdata获取{symbol}最新价失败: {e}")
+        # 降级：tick失败时，如果有缓存（哪怕过期）也尽量返回，避免None导致策略整段跳过
+        cached = latest_price_cache.get(symbol)
+        if cached is None:
+            return None
+        if isinstance(cached, tuple) and len(cached) == 2:
+            return cached[0]
+        return cached
+
     return None
+
+
+def get_optimized_buy_price(symbol: str, last_price: float, market_trend: str = 'neutral') -> float | None:
+    """
+    根据分时K线和VWAP判断当前是否处于局部高点，避免买在山峰。
+
+    逻辑改为“分级处理”而不是一刀切：
+    - bull：适度放宽乖离限制，允许强势突破但避免过热
+    - neutral：保持中性阈值
+    - bear：收紧乖离限制，尽量避免追高
+
+    处理方式：
+    - 轻微乖离：降低挂单价，不直接拦截
+    - 中度乖离：继续压价，但允许试仓
+    - 严重乖离/冲高回落：直接跳过买入
+
+    Returns:
+        float: 优化挂单价（低于现价，不在严重高点时）
+        None:  当前处于严重高点，跳过买入，等待回调
+    """
+    try:
+        from xtquant import xtdata
+        import math
+
+        # ========== 1. 获取分时1分钟K线（最近30根）及tick ==========
+        bars = xtdata.get_market_data(
+            field_list=['close', 'high', 'low', 'volume', 'amount'],
+            stock_list=[symbol],
+            period='1m',
+            count=30,
+        )
+
+        closes = []
+        bar_volumes = []
+        bar_amounts = []
+        if bars and 'close' in bars and symbol in bars['close']:
+            raw_close  = bars['close'][symbol]
+            raw_volume = bars.get('volume', {}).get(symbol, [])
+            raw_amount = bars.get('amount', {}).get(symbol, [])
+            for i, v in enumerate(raw_close):
+                if v is not None and float(v) > 0:
+                    closes.append(float(v))
+                    vol = float(raw_volume[i]) if i < len(raw_volume) and raw_volume[i] else 0
+                    amt = float(raw_amount[i]) if i < len(raw_amount) and raw_amount[i] else 0
+                    bar_volumes.append(vol)
+                    bar_amounts.append(amt)
+
+        # 数据不足时降级：只用tick判断
+        if len(closes) < 6:
+            logger.debug(f"[分时高点] {symbol}: 分时K线不足（{len(closes)}根），跳过高点判断")
+            closes = []
+
+        # ========== 2. 计算VWAP（成交量加权均价） ==========
+        # 优先用tick的全天累计VWAP（更准确），降级用分时K线VWAP
+        tick_info = xtdata.get_full_tick([symbol])
+        tick = tick_info.get(symbol) if tick_info else None
+
+        bid1 = last_price
+        tick_vwap = None
+        if tick:
+            bid_prices = tick.get('bidPrice', [])
+            if bid_prices and float(bid_prices[0]) > 0:
+                bid1 = float(bid_prices[0])
+            t_amount = float(tick.get('amount', 0) or 0)   # 单位：元
+            t_volume = float(tick.get('volume', 0) or 0)   # 单位：手（xtquant tick的volume为手）
+            # xtquant get_full_tick 的 volume 单位是手（100股），amount 单位是元
+            # VWAP = amount / (volume * 100)，换算为元/股
+            t_volume_shares = t_volume * 100
+            if t_volume_shares > 0 and t_amount > 0:
+                tick_vwap = t_amount / t_volume_shares
+
+        bar_vwap = None
+        if closes and sum(bar_volumes) > 0:
+            total_amt = sum(bar_amounts)
+            total_vol = sum(bar_volumes)
+            if total_vol > 0 and total_amt > 0:
+                bar_vwap = total_amt / total_vol
+
+        # 最终VWAP：优先tick全天VWAP，降级K线VWAP，兜底用现价
+        vwap = tick_vwap or bar_vwap or last_price
+
+        # ========== 3. 四重高点判断 ==========
+        is_peak = False
+        peak_reason = ""
+
+        # 动态乖离阈值：按市场状态调整
+        trend_cfg = MARKET_TIMING_CONFIG.get('market_aggressiveness', {})
+        market_trend_label = (market_trend or 'neutral').lower()
+        if market_trend_label == 'bull':
+            vwap_threshold = 2.0
+            deviation_threshold = 2.5
+            rise_threshold = 1.6
+        elif market_trend_label == 'bear':
+            vwap_threshold = 0.8
+            deviation_threshold = 1.0
+            rise_threshold = 0.8
+        else:
+            vwap_threshold = 1.2
+            deviation_threshold = 1.5
+            rise_threshold = 1.0
+
+        # 条件A：当前价显著高于VWAP（偏离当日成交重心）
+        vwap_dev_pct = (last_price - vwap) / vwap * 100 if vwap > 0 else 0
+        light_vwap_overshoot = vwap_dev_pct > vwap_threshold and vwap_dev_pct <= vwap_threshold + 0.8
+        severe_vwap_overshoot = vwap_dev_pct > vwap_threshold + 0.8
+        if severe_vwap_overshoot:
+            is_peak = True
+            peak_reason = (
+                f"价格显著高于VWAP（当前{last_price:.2f} vs VWAP{vwap:.2f}，"
+                f"乖离{vwap_dev_pct:.2f}%，阈值{vwap_threshold}%）"
+            )
+
+        if not is_peak and closes:
+            # 取最近20根和最近5根
+            recent20 = closes[-20:] if len(closes) >= 20 else closes
+            recent5  = closes[-5:]  if len(closes) >= 5  else closes
+
+            avg20  = sum(recent20) / len(recent20)   # 近20根均价
+            high20 = max(recent20)                   # 近20根最高价
+
+            # 当前价相对近20根均价的乖离率
+            deviation_pct = (last_price - avg20) / avg20 * 100
+
+            # 近5根K线的涨幅（从5根前到现在）
+            rise_5bar_pct = (last_price - recent5[0]) / recent5[0] * 100 if recent5[0] > 0 else 0
+
+            # 条件B：乖离率过大（当前价显著高于近期均价）
+            if deviation_pct > deviation_threshold + (0.8 if market_trend_label == 'bull' else 0.5):
+                is_peak = True
+                peak_reason = (
+                    f"价格乖离均价过大（当前{last_price:.2f} vs 近20根均价{avg20:.2f}，"
+                    f"乖离{deviation_pct:.2f}%，阈值{deviation_threshold}%）"
+                )
+
+            # 条件C：近5根快速拉升且价格高于均价（正处于拉升中的高点）
+            if not is_peak and rise_5bar_pct > rise_threshold and last_price > avg20:
+                # bull 市场允许更强势的突破，但 bear/neutral 更严格
+                if not (market_trend_label == 'bull' and rise_5bar_pct <= rise_threshold + 1.2 and deviation_pct <= deviation_threshold + 1.0):
+                    is_peak = True
+                    peak_reason = (
+                        f"近5根K线快速拉升（涨幅{rise_5bar_pct:.2f}%，阈值{rise_threshold}%），"
+                        f"且价格{last_price:.2f}高于近期均价{avg20:.2f}"
+                    )
+
+            # 条件D：V形拉升顶部（创近20根新高，且5根前价格低于均价）
+            price_5bar_ago = recent5[0] if recent5 else last_price
+            was_below_avg = price_5bar_ago < avg20  # 5根前处于均价以下
+            is_new_high = last_price >= high20 * 0.998  # 接近或创近期新高（0.2%容差）
+            if not is_peak and is_new_high and was_below_avg:
+                # bull 市场放宽，neutral/bear 保守
+                if market_trend_label == 'bull' and deviation_pct <= deviation_threshold + 1.0 and rise_5bar_pct <= rise_threshold + 1.0:
+                    pass
+                else:
+                    is_peak = True
+                    peak_reason = (
+                        f"V形拉升顶部（5根前价格{price_5bar_ago:.2f}<均价{avg20:.2f}，"
+                        f"当前{last_price:.2f}接近近20根最高价{high20:.2f}）"
+                    )
+
+        if is_peak:
+            logger.warning(f"[分时高点] {symbol}: 暂不买入，等待回调。原因: {peak_reason}")
+            print(f"[分时高点] {symbol}: 当前价={last_price:.2f}，处于分时高点，暂不买入。\n  原因: {peak_reason}")
+            return None
+
+        # 轻微乖离：不拦截，只压价
+        if light_vwap_overshoot:
+            logger.info(
+                f"[分时高点] {symbol}: 轻微高于VWAP({vwap_dev_pct:.2f}% > {vwap_threshold:.2f}%)，"
+                f"不拦截买入，仅降低挂单价"
+            )
+
+        # ========== 4. 不在高点：根据VWAP位置计算优化挂单价 ==========
+        is_below_vwap = last_price < vwap
+
+        # 综合买一价和VWAP，取较低者
+        base_price = bid1 if bid1 <= vwap else (bid1 + vwap) / 2
+
+        if is_below_vwap:
+            # 处于低位（价格低于VWAP）：折扣更小，减少错过机会（最大 -0.3%）
+            min_price = round(last_price * 0.997, 2)
+            position_label = "低位"
+        else:
+            # 中位（未触发高点但价格高于VWAP）：给更大折扣（最大 -0.5%）
+            min_price = round(last_price * 0.995, 2)
+            position_label = "中位"
+
+        optimized = max(min_price, min(base_price, last_price))
+        optimized = math.floor(optimized * 100) / 100
+        if optimized < min_price:
+            optimized = min_price
+
+        logger.info(
+            f"[优化挂单价] {symbol}: 最新价={last_price:.2f}, VWAP={vwap:.2f}(乖离{vwap_dev_pct:.2f}%), "
+            f"买一={bid1:.2f}, 位置={position_label}, 挂单价={optimized:.2f} ({(optimized/last_price-1)*100:.2f}%)"
+        )
+        return optimized
+
+    except Exception as e:
+        logger.warning(f"[优化挂单价] {symbol}: 计算失败({e})，使用最新价 {last_price:.2f}")
+        return last_price
+
 
 # 策略模板示例
 class SimpleMAStrategy:
@@ -252,8 +483,7 @@ async def get_config(environment: str = 'SIMULATION'):
             logger.error(f"切换到 {environment} 环境失败")
             raise Exception(f"环境切换失败: {environment}")
         path = env_manager.get_qmt_path()
-        # account = env_manager.get_account()
-        account = "8881667160"
+        account = env_manager.get_account()
         logger.info(f"使用 {environment} 环境: QMT路径={path}, 账户={account}")
         return path, account
     except Exception as e:
@@ -280,48 +510,9 @@ async def run_tornado_server():
         raise
 
 async def auto_select_and_buy(xt_trader, acc, order_manager, top_n=10):
-    if not is_trading_time():
-        logger.info("[自动买入] 当前非交易时间，跳过本次自动买入。")
-        return
-    try:
-        from utils.environment_manager import get_env_manager
-        env_manager = get_env_manager()
-        toshare_token = env_manager.get_tushare_token()
-        db_config = env_manager.get_database_config()
-        from user_strategy.simple_select_stock import SimpleStockSelector
-        selector = SimpleStockSelector(token=toshare_token, db_config=db_config)
-        stock_pool = await selector.get_top_stocks(top_n=top_n)
-        if not stock_pool:
-            logger.warning("未获取到推荐股票")
-            return
-        logger.info(f"获取到 {len(stock_pool)} 只推荐股票: {stock_pool}")
-        positions = await xt_trader.query_stock_positions(acc)
-        held_stocks = {p.stock_code for p in positions} if positions else set()
-        new_stocks = [stock for stock in stock_pool if stock not in held_stocks]
-        if not new_stocks:
-            logger.info("所有推荐股票都已持有")
-            return
-        logger.info(f"准备买入 {len(new_stocks)} 只新股票: {new_stocks}")
-        from modules.data_service.integration import get_data_service_manager
-        data_manager = get_data_service_manager()
-        for stock in new_stocks:
-            try:
-                bars = data_manager.get_bar_data(stock, '20240101', '20991231', '1min')
-                if bars:
-                    price = bars[-1].close
-                else:
-                    price = None
-                if price is None:
-                    logger.warning(f"无法获取 {stock} 最新价格，使用默认价格")
-                    price = 10.0
-                quantity = 100
-                order = order_manager.create_order(stock, "买", price, quantity, acc)
-                logger.info(f"自动买入下单: {stock}, 价格: {price}, 订单: {order}")
-            except Exception as e:
-                logger.error(f"买入 {stock} 失败: {e}")
-        selector.close()
-    except Exception as e:
-        logger.error(f"自动选股买入失败: {e}")
+    """旧的独立买入口：默认关闭，避免绕过主交易风控链路。"""
+    logger.warning("[自动买入] auto_select_and_buy 已禁用，请使用主交易风控链路进行买入")
+    return
 
 async def run_trader_system(path, account, environment='SIMULATION'):
     """多策略量化交易系统"""
@@ -342,8 +533,17 @@ async def run_trader_system(path, account, environment='SIMULATION'):
         
         logger.info("使用全局 xt_trader 实例")
         # 启动自动买卖+持仓监控闭环任务（每60秒自动买卖+分析）
-        async def create_and_record_order(symbol, side, price, quantity, account, user="system"):
-            params = {"symbol": symbol, "side": side, "price": price, "quantity": quantity, "account": account, "user": user}
+        async def create_and_record_order(symbol, side, price, quantity, account, user="system", **kwargs):
+            # 透传 min_order_value/check_cash 等参数，便于策略层做资金与最低金额的强约束
+            params = {
+                "symbol": symbol,
+                "side": side,
+                "price": price,
+                "quantity": quantity,
+                "account": account,
+                "user": user,
+                **kwargs,
+            }
             order = order_manager.create_order(**params)
             if order:
                 order_callback_handler.record_order_params(order.order_id, params)
@@ -357,12 +557,17 @@ async def run_trader_system(path, account, environment='SIMULATION'):
                 position_analyzer,
                 technical_analyzer,
                 lambda symbol: get_history_func(symbol, tushare_token),
-                lambda symbol: get_latest_price_func(symbol, xt_trader),
+                # 透传关键字参数：支持 force_refresh/max_age_sec，用于实盘风控/卖出检查强制刷新行情
+                lambda symbol, **kwargs: get_latest_price_func(symbol, xt_trader, **kwargs),
                 create_and_record_order,  # 直接传递async下单函数
                 interval=60,  # 保持60秒间隔，不影响交易响应速度
-                max_stocks=None  # 由DynamicPositionManager根据资金体量自动计算
+                max_stocks=None,  # 由DynamicPositionManager根据资金体量自动计算
+                get_optimized_buy_price_func=get_optimized_buy_price,  # 分时优化挂单价
+                environment=environment,  # 传入运行环境，模拟盘全天可买入
+                order_manager_instance=order_manager,  # 传入OrderManager实例，用于极端行情撤单
             )
         )
+
         # await run_tornado_server()
         # 保活由main_async统一管理
     except Exception as e:
@@ -377,8 +582,8 @@ async def trader_thread_func(path, account, environment):
 async def main_async():
     """主函数：启动多策略量化交易平台"""
     # 默认使用模拟环境
-    # environment = 'SIMULATION'
-    environment = 'PRODUCTION'
+    environment = 'SIMULATION'
+    # environment = 'PRODUCTION'
     logger.info(f"程序启动中... 环境: {environment}")
     global stock_selector, position_analyzer, technical_analyzer, order_manager, order_callback_handler, callback, tushare_token, xt_trader, account
     # --- 启动全局调度器（只启动一次） ---
@@ -401,7 +606,14 @@ async def main_async():
     
     # 初始化全局 xt_trader 实例
     xt_trader = XtQuantTrader(path, session_id)
-    order_manager = OrderManager(xt_trader, risk_manager, compliance_manager, audit_logger)
+    # 10万以下的小额卖单：不启用“超时撤单重卖”，避免出现“两笔委托”带来的额外手续费
+    order_manager = OrderManager(
+        xt_trader,
+        risk_manager,
+        compliance_manager,
+        audit_logger,
+        sell_resell_min_value=100000.0,
+    )
     order_callback_handler = OrderCallbackHandler(order_manager)
     callback = MyXtQuantTraderCallback(order_manager, order_callback_handler)
     xt_trader.register_callback(callback)

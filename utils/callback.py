@@ -190,12 +190,35 @@ class OrderCallbackHandler:
             logging.info(f"[订单回调] response 对象属性: {response_attrs}")
             print(f"[订单回调] response 对象属性: {response_attrs}")
             
+            # 注意：XtOrderResponse 在很多场景下只是一条“提交回执”，通常只包含 order_id/seq/error_msg，
+            # 并不包含 order_status/stock_code/price/filled 等字段；这些字段会在后续 on_stock_order/on_stock_trade 推送里出现。
             order_id = getattr(response, 'order_id', None)
+            error_msg = getattr(response, 'error_msg', '') or ''
+
+            # 兼容不同字段命名（有的版本叫 order_status，有的叫 status）
             status = getattr(response, 'order_status', None)
-            error_msg = getattr(response, 'error_msg', '')
-            filled = getattr(response, 'filled', 0)
-            price = getattr(response, 'price', 0)
-            symbol = getattr(response, 'stock_code', '')
+            if status is None:
+                status = getattr(response, 'status', None)
+
+            filled = getattr(response, 'filled', None)
+            if filled is None:
+                filled = getattr(response, 'filled_quantity', 0)
+
+            price = getattr(response, 'price', None)
+            if price is None:
+                price = getattr(response, 'avg_fill_price', 0)
+
+            symbol = getattr(response, 'stock_code', None) or getattr(response, 'symbol', None) or ''
+
+            # 如果 response 没带股票代码，尝试通过 broker_order_id -> local_order_id -> params 反查（用于更友好的日志）
+            if (not symbol) and order_id is not None:
+                try:
+                    local_order_id = self.order_manager.broker_order_map.get(str(order_id)) or self.order_manager.broker_order_map.get(order_id)
+                    if local_order_id:
+                        params = self.order_params.get(local_order_id) or {}
+                        symbol = params.get("symbol", "") or symbol
+                except Exception:
+                    pass
             
             # 增强日志记录
             logging.info(f"[订单回调] 订单ID={order_id}, 状态={status}, 错误信息={error_msg}, "
@@ -208,8 +231,8 @@ class OrderCallbackHandler:
                 logging.error(f"[订单回调] 订单提交失败: order_id={order_id}, 状态={status}, 错误信息={error_msg}")
                 print(f"[订单回调错误] 订单提交失败: order_id={order_id}, 状态={status}, 错误信息={error_msg}")
             
-            # 如果状态为None，记录警告
-            if status is None:
+            # 如果 response 本身不提供状态字段，就不要误报“状态None”
+            if status is None and ('order_status' in response_attrs or 'status' in response_attrs):
                 logging.warning(f"[订单回调] 订单状态为None: order_id={order_id}, 可能是订单提交失败或状态未更新")
                 print(f"[订单回调警告] 订单状态为None: order_id={order_id}, 可能是订单提交失败或状态未更新")
 
@@ -237,8 +260,8 @@ class OrderCallbackHandler:
                         old_order = self.order_history[symbol].pop(0)
                         self.broker_order_to_symbol.pop(old_order['broker_order_id'], None)
 
-            # 2. 成交回报处理
-            if status in ['已成交', '部分成交']:
+            # 2. 成交回报处理（注意：回执未必包含成交信息）
+            if status in ['已成交', '部分成交'] and symbol:
                 self.update_position(symbol, filled, price)
                 print(f"[成交回报] 订单{order_id} {symbol} 成交 {filled} 股 @ {price}")
 
@@ -312,6 +335,9 @@ class OrderCallbackHandler:
         failed_order_id = order_error.order_id
         error_id = order_error.error_id
         error_msg = order_error.error_msg
+
+        # 资金不足属于“业务拒单”，不应该触发“撤上一个订单”的逻辑（否则会误撤掉别的单）
+        is_insufficient_funds = (error_id == -57) or ("可用资金不足" in (error_msg or "")) or ("资金不足" in (error_msg or ""))
         
         # 检查是否是T+1限制错误（证券可用数量不足，通常是当日买入的股票不能当日卖出）
         is_t1_error = False
@@ -506,13 +532,17 @@ class OrderCallbackHandler:
                 self.broker_order_to_symbol[failed_order_id] = symbol
                 logging.info(f"[撤单] 已记录失败订单到历史: {symbol} - {failed_order_id}")
             
-            # T+1错误不需要撤单（因为不是真正的订单问题，而是交易规则限制）
-            if not is_t1_error:
-                # 尝试撤该股票的上一个订单（非T+1错误才撤单）
+            # T+1错误 / 资金不足都不需要撤单（不是“需要撤上一个单来恢复”的问题）
+            if not is_t1_error and not is_insufficient_funds:
+                # 尝试撤该股票的上一个订单（非T+1错误、非资金不足才撤单）
                 self._cancel_previous_order(symbol, failed_order_id)
             else:
-                logging.info(f"[T+1限制] {symbol}: 因T+1规则限制导致委托失败，不执行撤单操作")
-                print(f"[T+1限制] {symbol}: 因T+1规则限制导致委托失败，不执行撤单操作")
+                if is_t1_error:
+                    logging.info(f"[T+1限制] {symbol}: 因T+1规则限制导致委托失败，不执行撤单操作")
+                    print(f"[T+1限制] {symbol}: 因T+1规则限制导致委托失败，不执行撤单操作")
+                if is_insufficient_funds:
+                    logging.info(f"[资金不足] {symbol}: 因资金不足导致委托失败，不执行撤单操作")
+                    print(f"[资金不足] {symbol}: 因资金不足导致委托失败，不执行撤单操作")
         else:
             logging.warning(f"[撤单] 无法找到失败订单{failed_order_id}对应的股票代码，无法撤单")
             print(f"[撤单] 无法找到失败订单{failed_order_id}对应的股票代码，无法撤单")

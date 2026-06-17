@@ -92,7 +92,7 @@ if __name__ == '__main__':
     # QMT账号
     account = configData["account"][0]
     # 配置
-    tushare_token = 'gx03013e909f633ecb66722df66b360f070426613316ebf06ecd3482'
+    tushare_token = 'd78dd56431844928f2af3ecc8810a03ca24abada7300ce33c9659308'
     xt_user = '55005056'
     acc = StockAccount(account, 'STOCK')
     session_id = int(time.time())
