@@ -253,7 +253,7 @@ async def get_config(environment: str = 'SIMULATION'):
             raise Exception(f"环境切换失败: {environment}")
         path = env_manager.get_qmt_path()
         # account = env_manager.get_account()
-        account = "8881667160"
+        account = "55005056"
         logger.info(f"使用 {environment} 环境: QMT路径={path}, 账户={account}")
         return path, account
     except Exception as e:
@@ -377,8 +377,8 @@ async def trader_thread_func(path, account, environment):
 async def main_async():
     """主函数：启动多策略量化交易平台"""
     # 默认使用模拟环境
-    # environment = 'SIMULATION'
-    environment = 'PRODUCTION'
+    environment = 'SIMULATION'
+    # environment = 'PRODUCTION'
     logger.info(f"程序启动中... 环境: {environment}")
     global stock_selector, position_analyzer, technical_analyzer, order_manager, order_callback_handler, callback, tushare_token, xt_trader, account
     # --- 启动全局调度器（只启动一次） ---

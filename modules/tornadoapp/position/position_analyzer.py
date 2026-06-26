@@ -18,7 +18,7 @@ class PositionAnalyzer:
     
     def __init__(self, tushare_token: str):
         self.pro = ts.pro_api(tushare_token)
-        self.tushare_token = tushare_token # 新增：存储tushare_token
+        self.tushare_token = "d78dd56431844928f2af3ecc8810a03ca24abada7300ce33c9659308" # 新增：存储tushare_token
         
     def calculate_position_metrics(self, position: Position) -> Position:
         """计算单个持仓的指标"""
