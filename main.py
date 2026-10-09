@@ -456,3 +456,91 @@ async def main_async():
 if __name__ == "__main__":
     asyncio.run(main_async())
 
+    def advanced_backtest(df, buy_col='buy_signal', sell_col='sell_signal', price_col='close', fee=0.001):
+        capital = 1.0
+        capital_curve = []
+        position = 0
+        entry_price = 0
+        max_capital = 1.0
+        max_drawdown = 0
+        hold_days = 0
+        hold_days_list = []
+        for i, row in df.iterrows():
+            if position == 0 and row.get(buy_col, False):
+                position = 1
+                entry_price = row[price_col] * (1 + fee)
+                hold_days = 0
+            elif position == 1:
+                hold_days += 1
+                if row.get(sell_col, False):
+                    exit_price = row[price_col] * (1 - fee)
+                    ret = (exit_price - entry_price) / entry_price
+                    capital *= (1 + ret)
+                    hold_days_list.append(hold_days)
+                    position = 0
+                    hold_days = 0
+            capital_curve.append(capital)
+            max_capital = max(max_capital, capital)
+            max_drawdown = min(max_drawdown, (capital - max_capital) / max_capital)
+        # 最后持仓强制平仓
+        if position == 1:
+            exit_price = df[price_col].iloc[-1] * (1 - fee)
+            ret = (exit_price - entry_price) / entry_price
+            capital *= (1 + ret)
+            hold_days_list.append(hold_days)
+            capital_curve.append(capital)
+            max_capital = max(max_capital, capital)
+            max_drawdown = min(max_drawdown, (capital - max_capital) / max_capital)
+        total_return = capital - 1
+        avg_hold_days = sum(hold_days_list) / len(hold_days_list) if hold_days_list else 0
+        return {
+            'total_return': total_return,
+            'max_drawdown': max_drawdown,
+            'avg_hold_days': avg_hold_days,
+            'trades': len(hold_days_list),
+            'capital_curve': capital_curve
+        }
+
+    def main():
+        # 1. 批量信号补全+选股
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        print(f"\n正在批量选股并生成今日({today_str})推荐池...")
+        pool = batch_select_stock_pool(DATA_DIR, today_str)
+        print(pool)
+        pool_file = os.path.join(DATA_DIR, f'daily_stock_pool_{today_str}.csv')
+        pool.to_csv(pool_file, index=False)
+        print(f"今日推荐股票池已保存到: {pool_file}")
+
+        # 2. 批量回测所有股票
+        print("\n正在批量回测所有股票...")
+        results = []
+        files = [f for f in os.listdir(DATA_DIR) if f.endswith('.csv') and '_1min_' in f]
+        for file in files:
+            df = pd.read_csv(f'{DATA_DIR}/{file}')
+            if 'trade_time' in df.columns:
+                df['trade_time'] = pd.to_datetime(df['trade_time'])
+            df = add_all_signals(df)
+            res = advanced_backtest(df, buy_col='buy_signal', sell_col='sell_signal')
+            res['ts_code'] = file.split('_')[0]
+            results.append(res)
+        bt_df = pd.DataFrame(results)
+        print(bt_df)
+        bt_df.to_csv(f'{DATA_DIR}/backtest_summary.csv', index=False)
+        print(f"回测汇总已保存到: {DATA_DIR}/backtest_summary.csv")
+
+        # 3. 可选：输出某只股票的资金曲线
+        # 例如：
+        # import matplotlib.pyplot as plt
+        # plt.plot(bt_df.iloc[0]['capital_curve'])
+        # plt.title('资金曲线')
+        # plt.show()
+        import tornado.ioloop
+
+        from modules.tornadoapp.app import app
+        from modules.tornadoapp.db.dbUtil import init_beanie
+        tornado.ioloop.IOLoop.current().run_sync(init_beanie)
+        http_server = tornado.httpserver.HTTPServer(app, max_body_size=1024**3 * 5)
+        http_server.listen(8888)
+        tornado.ioloop.IOLoop.current().start()
+    if __name__ == '__main__':
+        main()

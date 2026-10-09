@@ -117,3 +117,22 @@ def get_common_db_url(common_db_config):
         db_url = f"mongodb://{ip}:{port}"
     return db_url
 
+# 技术指标参数
+MA_SHORT = 5
+MA_LONG = 20
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
+BOLL_WINDOW = 20
+BOLL_STD = 2
+RSI_PERIOD = 14
+SUPPORT_RESIST_WINDOW = 20
+
+# 选股参数
+STOCK_POOL_SIGNALS = ['golden_cross', 'macd_golden']  # 选股信号组合
+MIN_VOLUME = 1e5  # 最小成交量过滤
+MIN_PRICE = 2     # 最低股价过滤
+
+# 数据路径
+DATA_DIR = 'data/min'
+
